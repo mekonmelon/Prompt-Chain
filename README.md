@@ -38,8 +38,9 @@ npm run dev
 
 ## 5) Dashboard sections
 
-The home dashboard contains three management sections:
+The home dashboard contains a statistics overview and three management sections:
 
+- **Statistics**: total users, total images, average captions per image, and top 5 upvoted captions from `caption_votes`.
 - **Users**: Read-only table of all rows from `profiles`.
 - **Images**: View all images, create image rows, edit `description`, and delete rows from `images`.
 - **Captions**: Read-only list of all rows from `captions`.
@@ -65,3 +66,7 @@ To disable Vercel Deployment Protection for testing:
 1. Open your Vercel project.
 2. Go to **Settings → Deployment Protection**.
 3. Disable protection for the environment you're testing (usually Preview).
+
+## 8) Styling
+
+- UI uses Tailwind utility classes (loaded via Tailwind Play CDN in `app/layout.tsx`) to render the dashboard cards, ranking list, and table layouts.
