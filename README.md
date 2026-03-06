@@ -82,4 +82,3 @@ If the **Continue with Google** button does not redirect:
    - `http://localhost:3000/auth/callback`
    - `https://<your-domain>/auth/callback`
 4. In Supabase Auth → Providers → Google, ensure Google provider is enabled and credentials are valid.
-
