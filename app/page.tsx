@@ -7,25 +7,43 @@ type GenericRow = Record<string, unknown>
 type TableResult = {
   rows: GenericRow[]
   error: string | null
+  resolvedTable: string
 }
 
-const TABLES = {
-  profiles: 'profiles',
-  images: 'images',
-  humorFlavors: 'humor_flavors',
-  humorFlavorSteps: 'humor_flavor_steps',
-  humorFlavorMix: 'humor_flavor_mix',
-  terms: 'terms',
-  captions: 'captions',
-  captionRequests: 'caption_requests',
-  captionExamples: 'caption_examples',
-  llmModels: 'llm_models',
-  llmProviders: 'llm_providers',
-  llmPromptChains: 'llm_prompt_chains',
-  llmResponses: 'llm_responses',
-  allowedSignupDomains: 'allowed_signup_domains',
-  whitelistedEmailAddresses: 'whitelisted_email_addresses'
-} as const
+type TableConfig = {
+  key: string
+  label: string
+  readOnly?: boolean
+  sortColumn?: 'created_datetime_utc'
+  fallbackTables?: string[]
+}
+
+const TABLES: Record<string, TableConfig> = {
+  profiles: { key: 'profiles', label: 'profiles', readOnly: true, sortColumn: 'created_datetime_utc' },
+  images: { key: 'images', label: 'images', sortColumn: 'created_datetime_utc' },
+  humorFlavors: { key: 'humor_flavors', label: 'humor_flavors', readOnly: true },
+  humorFlavorSteps: { key: 'humor_flavor_steps', label: 'humor_flavor_steps', readOnly: true },
+  humorFlavorMix: { key: 'humor_flavor_mix', label: 'humor_flavor_mix', sortColumn: 'created_datetime_utc' },
+  terms: { key: 'terms', label: 'terms', sortColumn: 'created_datetime_utc' },
+  captions: { key: 'captions', label: 'captions', readOnly: true, sortColumn: 'created_datetime_utc' },
+  captionRequests: { key: 'caption_requests', label: 'caption_requests', readOnly: true, sortColumn: 'created_datetime_utc' },
+  captionExamples: { key: 'caption_examples', label: 'caption_examples', sortColumn: 'created_datetime_utc' },
+  llmModels: { key: 'llm_models', label: 'llm_models', sortColumn: 'created_datetime_utc' },
+  llmProviders: { key: 'llm_providers', label: 'llm_providers', sortColumn: 'created_datetime_utc' },
+  llmPromptChains: { key: 'llm_prompt_chains', label: 'llm_prompt_chains', readOnly: true, sortColumn: 'created_datetime_utc' },
+  llmResponses: {
+    key: 'llm_model_responses',
+    label: 'llm_model_responses',
+    readOnly: true,
+    fallbackTables: ['llm_responses']
+  },
+  allowedSignupDomains: { key: 'allowed_signup_domains', label: 'allowed_signup_domains', sortColumn: 'created_datetime_utc' },
+  whitelistedEmailAddresses: {
+    key: 'whitelisted_email_addresses',
+    label: 'whitelisted_email_addresses',
+    fallbackTables: ['whitelisted_emails', 'allowed_signup_emails']
+  }
+}
 
 function asText(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -52,6 +70,11 @@ function parsePayload(raw: FormDataEntryValue | null): GenericRow {
   return parsed as GenericRow
 }
 
+function isMissingTableError(message: string | null | undefined) {
+  if (!message) return false
+  return message.includes('schema cache') || message.includes('Could not find the table')
+}
+
 async function createGenericRow(formData: FormData) {
   'use server'
   const supabase = createClient()
@@ -71,6 +94,11 @@ async function updateGenericRow(formData: FormData) {
   if (!table || !id) return
 
   const payload = parsePayload(formData.get('payload'))
+
+  if (table === TABLES.images.key) {
+    payload.modified_datetime_utc = new Date().toISOString()
+  }
+
   await supabase.from(table).update(payload).eq('id', id)
   revalidatePath('/')
 }
@@ -95,13 +123,21 @@ async function createImageRow(formData: FormData) {
 
   const url = String(formData.get('url') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim()
-  const userId = String(formData.get('user_id') ?? '').trim() || user?.id
+  const profileId = String(formData.get('profile_id') ?? '').trim() || user?.id
   if (!url) return
 
-  const payload: GenericRow = { url, description }
-  if (userId) payload.user_id = userId
+  const payload: GenericRow = {
+    url,
+    image_description: description,
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  }
 
-  await supabase.from(TABLES.images).insert(payload)
+  if (profileId) {
+    payload.profile_id = profileId
+  }
+
+  await supabase.from(TABLES.images.key).insert(payload)
   revalidatePath('/')
 }
 
@@ -161,33 +197,14 @@ function ReadTable({ rows, preferred }: { rows: GenericRow[]; preferred?: string
   )
 }
 
-function CrudSection({
-  table,
-  title,
-  subtitle,
-  rows,
-  includeCreate = true,
-  preferred
-}: {
-  table: string
-  title: string
-  subtitle: string
-  rows: GenericRow[]
-  includeCreate?: boolean
-  preferred?: string[]
-}) {
+function CrudSection({ table, title, subtitle, rows, includeCreate = true, preferred }: { table: string; title: string; subtitle: string; rows: GenericRow[]; includeCreate?: boolean; preferred?: string[] }) {
   return (
     <Section title={title} subtitle={subtitle}>
       {includeCreate ? (
         <form action={createGenericRow} className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <input type="hidden" name="table" value={table} />
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Create JSON payload</label>
-          <textarea
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs"
-            defaultValue="{}"
-            name="payload"
-            rows={4}
-          />
+          <textarea className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" defaultValue="{}" name="payload" rows={4} />
           <button className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700" type="submit">
             Create Row
           </button>
@@ -204,16 +221,10 @@ function CrudSection({
           return (
             <article key={id || index} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Row ID: {id}</p>
-
               <form action={updateGenericRow} className="space-y-2">
                 <input type="hidden" name="table" value={table} />
                 <input type="hidden" name="id" value={id} />
-                <textarea
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs"
-                  defaultValue={JSON.stringify(row, null, 2)}
-                  name="payload"
-                  rows={8}
-                />
+                <textarea className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" defaultValue={JSON.stringify(row, null, 2)} name="payload" rows={8} />
                 <button className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700" type="submit">
                   Update
                 </button>
@@ -240,11 +251,32 @@ export default async function Home() {
     data: { user }
   } = await supabase.auth.getUser()
 
-  const fetch = async (table: string): Promise<TableResult> => {
-    const { data, error } = await supabase.from(table).select('*').order('created_at', { ascending: false })
+  const fetchTable = async (config: TableConfig): Promise<TableResult> => {
+    const candidates = [config.key, ...(config.fallbackTables ?? [])]
+
+    for (const tableName of candidates) {
+      let query = supabase.from(tableName).select('*')
+      if (config.sortColumn) {
+        query = query.order(config.sortColumn, { ascending: false })
+      }
+
+      const { data, error } = await query
+
+      if (!error) {
+        return { rows: (data ?? []) as GenericRow[], error: null, resolvedTable: tableName }
+      }
+
+      if (isMissingTableError(error.message)) {
+        continue
+      }
+
+      return { rows: [], error: error.message, resolvedTable: tableName }
+    }
+
     return {
-      rows: (data ?? []) as GenericRow[],
-      error: error?.message ?? null
+      rows: [],
+      error: `No matching table found in schema cache for candidates: ${candidates.join(', ')}`,
+      resolvedTable: candidates[0]
     }
   }
 
@@ -265,39 +297,39 @@ export default async function Home() {
     allowedSignupDomains,
     whitelistedEmailAddresses
   ] = await Promise.all([
-    fetch(TABLES.profiles),
-    fetch(TABLES.images),
-    fetch(TABLES.humorFlavors),
-    fetch(TABLES.humorFlavorSteps),
-    fetch(TABLES.humorFlavorMix),
-    fetch(TABLES.terms),
-    fetch(TABLES.captions),
-    fetch(TABLES.captionRequests),
-    fetch(TABLES.captionExamples),
-    fetch(TABLES.llmModels),
-    fetch(TABLES.llmProviders),
-    fetch(TABLES.llmPromptChains),
-    fetch(TABLES.llmResponses),
-    fetch(TABLES.allowedSignupDomains),
-    fetch(TABLES.whitelistedEmailAddresses)
+    fetchTable(TABLES.profiles),
+    fetchTable(TABLES.images),
+    fetchTable(TABLES.humorFlavors),
+    fetchTable(TABLES.humorFlavorSteps),
+    fetchTable(TABLES.humorFlavorMix),
+    fetchTable(TABLES.terms),
+    fetchTable(TABLES.captions),
+    fetchTable(TABLES.captionRequests),
+    fetchTable(TABLES.captionExamples),
+    fetchTable(TABLES.llmModels),
+    fetchTable(TABLES.llmProviders),
+    fetchTable(TABLES.llmPromptChains),
+    fetchTable(TABLES.llmResponses),
+    fetchTable(TABLES.allowedSignupDomains),
+    fetchTable(TABLES.whitelistedEmailAddresses)
   ])
 
   const allErrors = [
-    [TABLES.profiles, profiles.error],
-    [TABLES.images, images.error],
-    [TABLES.humorFlavors, humorFlavors.error],
-    [TABLES.humorFlavorSteps, humorFlavorSteps.error],
-    [TABLES.humorFlavorMix, humorFlavorMix.error],
-    [TABLES.terms, terms.error],
-    [TABLES.captions, captions.error],
-    [TABLES.captionRequests, captionRequests.error],
-    [TABLES.captionExamples, captionExamples.error],
-    [TABLES.llmModels, llmModels.error],
-    [TABLES.llmProviders, llmProviders.error],
-    [TABLES.llmPromptChains, llmPromptChains.error],
-    [TABLES.llmResponses, llmResponses.error],
-    [TABLES.allowedSignupDomains, allowedSignupDomains.error],
-    [TABLES.whitelistedEmailAddresses, whitelistedEmailAddresses.error]
+    [profiles.resolvedTable, profiles.error],
+    [images.resolvedTable, images.error],
+    [humorFlavors.resolvedTable, humorFlavors.error],
+    [humorFlavorSteps.resolvedTable, humorFlavorSteps.error],
+    [humorFlavorMix.resolvedTable, humorFlavorMix.error],
+    [terms.resolvedTable, terms.error],
+    [captions.resolvedTable, captions.error],
+    [captionRequests.resolvedTable, captionRequests.error],
+    [captionExamples.resolvedTable, captionExamples.error],
+    [llmModels.resolvedTable, llmModels.error],
+    [llmProviders.resolvedTable, llmProviders.error],
+    [llmPromptChains.resolvedTable, llmPromptChains.error],
+    [llmResponses.resolvedTable, llmResponses.error],
+    [allowedSignupDomains.resolvedTable, allowedSignupDomains.error],
+    [whitelistedEmailAddresses.resolvedTable, whitelistedEmailAddresses.error]
   ].filter(([, error]) => Boolean(error))
 
   return (
@@ -334,15 +366,15 @@ export default async function Home() {
           includeCreate={false}
           rows={images.rows}
           subtitle="Create image rows using the quick upload form, then update/delete existing rows below."
-          table={TABLES.images}
+          table={images.resolvedTable}
           title="Images (Create / Read / Update / Delete)"
         />
 
-        <Section title="Upload New Image" subtitle="Create new image records using URL + optional description/user.">
+        <Section title="Upload New Image" subtitle="Create new image records using URL + optional description/profile.">
           <form action={createImageRow} className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
             <input className="rounded-md border border-slate-300 px-3 py-2" name="url" placeholder="https://image-url" required />
             <input className="rounded-md border border-slate-300 px-3 py-2" name="description" placeholder="description" />
-            <input className="rounded-md border border-slate-300 px-3 py-2" name="user_id" placeholder="user_id (optional)" />
+            <input className="rounded-md border border-slate-300 px-3 py-2" name="profile_id" placeholder="profile_id (optional)" />
             <button className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 md:col-span-3" type="submit">
               Upload New Image Row
             </button>
@@ -350,7 +382,7 @@ export default async function Home() {
         </Section>
 
         <Section title="Users / Profiles (Read)" subtitle="Read users from the profiles table.">
-          <ReadTable preferred={['id', 'email', 'is_superadmin', 'created_at']} rows={profiles.rows} />
+          <ReadTable preferred={['id', 'email', 'is_superadmin', 'created_datetime_utc']} rows={profiles.rows} />
         </Section>
 
         <Section title="Humor Flavors (Read)" subtitle="Read humor flavor records.">
@@ -361,15 +393,8 @@ export default async function Home() {
           <ReadTable rows={humorFlavorSteps.rows} />
         </Section>
 
-        <CrudSection
-          includeCreate={false}
-          rows={humorFlavorMix.rows}
-          subtitle="Read and update humor mix rows."
-          table={TABLES.humorFlavorMix}
-          title="Humor Mix (Read / Update)"
-        />
-
-        <CrudSection rows={terms.rows} subtitle="Create, read, update, and delete terms." table={TABLES.terms} title="Terms (CRUD)" />
+        <CrudSection includeCreate={false} rows={humorFlavorMix.rows} subtitle="Read and update humor mix rows." table={humorFlavorMix.resolvedTable} title="Humor Mix (Read / Update)" />
+        <CrudSection rows={terms.rows} subtitle="Create, read, update, and delete terms." table={terms.resolvedTable} title="Terms (CRUD)" />
 
         <Section title="Captions (Read)" subtitle="Read captions.">
           <ReadTable rows={captions.rows} />
@@ -379,48 +404,20 @@ export default async function Home() {
           <ReadTable rows={captionRequests.rows} />
         </Section>
 
-        <CrudSection
-          rows={captionExamples.rows}
-          subtitle="Create, read, update, and delete caption examples."
-          table={TABLES.captionExamples}
-          title="Caption Examples (CRUD)"
-        />
-
-        <CrudSection
-          rows={llmModels.rows}
-          subtitle="Create, read, update, and delete llm models."
-          table={TABLES.llmModels}
-          title="LLM Models (CRUD)"
-        />
-
-        <CrudSection
-          rows={llmProviders.rows}
-          subtitle="Create, read, update, and delete llm providers."
-          table={TABLES.llmProviders}
-          title="LLM Providers (CRUD)"
-        />
+        <CrudSection rows={captionExamples.rows} subtitle="Create, read, update, and delete caption examples." table={captionExamples.resolvedTable} title="Caption Examples (CRUD)" />
+        <CrudSection rows={llmModels.rows} subtitle="Create, read, update, and delete llm models." table={llmModels.resolvedTable} title="LLM Models (CRUD)" />
+        <CrudSection rows={llmProviders.rows} subtitle="Create, read, update, and delete llm providers." table={llmProviders.resolvedTable} title="LLM Providers (CRUD)" />
 
         <Section title="LLM Prompt Chains (Read)" subtitle="Read prompt chain definitions.">
           <ReadTable rows={llmPromptChains.rows} />
         </Section>
 
-        <Section title="LLM Responses (Read)" subtitle="Read stored llm responses.">
+        <Section title="LLM Model Responses (Read)" subtitle="Read stored model responses.">
           <ReadTable rows={llmResponses.rows} />
         </Section>
 
-        <CrudSection
-          rows={allowedSignupDomains.rows}
-          subtitle="Create, read, update, and delete allowed signup domains."
-          table={TABLES.allowedSignupDomains}
-          title="Allowed Signup Domains (CRUD)"
-        />
-
-        <CrudSection
-          rows={whitelistedEmailAddresses.rows}
-          subtitle="Create, read, update, and delete whitelisted e-mail addresses."
-          table={TABLES.whitelistedEmailAddresses}
-          title="Whitelisted E-mail Addresses (CRUD)"
-        />
+        <CrudSection rows={allowedSignupDomains.rows} subtitle="Create, read, update, and delete allowed signup domains." table={allowedSignupDomains.resolvedTable} title="Allowed Signup Domains (CRUD)" />
+        <CrudSection rows={whitelistedEmailAddresses.rows} subtitle="Create, read, update, and delete whitelisted e-mail addresses." table={whitelistedEmailAddresses.resolvedTable} title="Whitelisted E-mail Addresses (CRUD)" />
       </main>
     </div>
   )
