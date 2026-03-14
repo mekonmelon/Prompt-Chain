@@ -13,36 +13,26 @@ type TableResult = {
 type TableConfig = {
   key: string
   label: string
-  readOnly?: boolean
   sortColumn?: 'created_datetime_utc'
-  fallbackTables?: string[]
+  missingTableIsEmpty?: boolean
 }
 
 const TABLES: Record<string, TableConfig> = {
-  profiles: { key: 'profiles', label: 'profiles', readOnly: true, sortColumn: 'created_datetime_utc' },
+  profiles: { key: 'profiles', label: 'profiles', sortColumn: 'created_datetime_utc' },
   images: { key: 'images', label: 'images', sortColumn: 'created_datetime_utc' },
-  humorFlavors: { key: 'humor_flavors', label: 'humor_flavors', readOnly: true },
-  humorFlavorSteps: { key: 'humor_flavor_steps', label: 'humor_flavor_steps', readOnly: true },
+  humorFlavors: { key: 'humor_flavors', label: 'humor_flavors' },
+  humorFlavorSteps: { key: 'humor_flavor_steps', label: 'humor_flavor_steps' },
   humorFlavorMix: { key: 'humor_flavor_mix', label: 'humor_flavor_mix', sortColumn: 'created_datetime_utc' },
   terms: { key: 'terms', label: 'terms', sortColumn: 'created_datetime_utc' },
-  captions: { key: 'captions', label: 'captions', readOnly: true, sortColumn: 'created_datetime_utc' },
-  captionRequests: { key: 'caption_requests', label: 'caption_requests', readOnly: true, sortColumn: 'created_datetime_utc' },
+  captions: { key: 'captions', label: 'captions', sortColumn: 'created_datetime_utc' },
+  captionRequests: { key: 'caption_requests', label: 'caption_requests', sortColumn: 'created_datetime_utc' },
   captionExamples: { key: 'caption_examples', label: 'caption_examples', sortColumn: 'created_datetime_utc' },
   llmModels: { key: 'llm_models', label: 'llm_models', sortColumn: 'created_datetime_utc' },
   llmProviders: { key: 'llm_providers', label: 'llm_providers', sortColumn: 'created_datetime_utc' },
-  llmPromptChains: { key: 'llm_prompt_chains', label: 'llm_prompt_chains', readOnly: true, sortColumn: 'created_datetime_utc' },
-  llmResponses: {
-    key: 'llm_model_responses',
-    label: 'llm_model_responses',
-    readOnly: true,
-    fallbackTables: ['llm_responses']
-  },
+  llmPromptChains: { key: 'llm_prompt_chains', label: 'llm_prompt_chains', sortColumn: 'created_datetime_utc' },
+  llmResponses: { key: 'llm_model_responses', label: 'llm_model_responses' },
   allowedSignupDomains: { key: 'allowed_signup_domains', label: 'allowed_signup_domains', sortColumn: 'created_datetime_utc' },
-  whitelistedEmailAddresses: {
-    key: 'whitelisted_email_addresses',
-    label: 'whitelisted_email_addresses',
-    fallbackTables: ['whitelisted_emails', 'allowed_signup_emails']
-  }
+  whitelistedEmailAddresses: { key: 'whitelisted_email_addresses', label: 'whitelisted_email_addresses', missingTableIsEmpty: true }
 }
 
 function asText(value: unknown): string {
@@ -133,9 +123,7 @@ async function createImageRow(formData: FormData) {
     modified_datetime_utc: new Date().toISOString()
   }
 
-  if (profileId) {
-    payload.profile_id = profileId
-  }
+  if (profileId) payload.profile_id = profileId
 
   await supabase.from(TABLES.images.key).insert(payload)
   revalidatePath('/')
@@ -221,6 +209,7 @@ function CrudSection({ table, title, subtitle, rows, includeCreate = true, prefe
           return (
             <article key={id || index} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Row ID: {id}</p>
+
               <form action={updateGenericRow} className="space-y-2">
                 <input type="hidden" name="table" value={table} />
                 <input type="hidden" name="id" value={id} />
@@ -252,33 +241,57 @@ export default async function Home() {
   } = await supabase.auth.getUser()
 
   const fetchTable = async (config: TableConfig): Promise<TableResult> => {
-    const candidates = [config.key, ...(config.fallbackTables ?? [])]
-
-    for (const tableName of candidates) {
-      let query = supabase.from(tableName).select('*')
+    try {
+      let query = supabase.from(config.key).select('*')
       if (config.sortColumn) {
         query = query.order(config.sortColumn, { ascending: false })
       }
 
       const { data, error } = await query
 
-      if (!error) {
-        return { rows: (data ?? []) as GenericRow[], error: null, resolvedTable: tableName }
+      if (error) {
+        if (config.missingTableIsEmpty && isMissingTableError(error.message)) {
+          return { rows: [], error: null, resolvedTable: config.key }
+        }
+        return { rows: [], error: error.message, resolvedTable: config.key }
       }
 
-      if (isMissingTableError(error.message)) {
-        continue
+      return { rows: (data ?? []) as GenericRow[], error: null, resolvedTable: config.key }
+    } catch (error) {
+      return {
+        rows: [],
+        error: error instanceof Error ? error.message : `Unknown fetch error for ${config.key}`,
+        resolvedTable: config.key
       }
-
-      return { rows: [], error: error.message, resolvedTable: tableName }
-    }
-
-    return {
-      rows: [],
-      error: `No matching table found in schema cache for candidates: ${candidates.join(', ')}`,
-      resolvedTable: candidates[0]
     }
   }
+
+  const settled = await Promise.allSettled([
+    fetchTable(TABLES.profiles),
+    fetchTable(TABLES.images),
+    fetchTable(TABLES.humorFlavors),
+    fetchTable(TABLES.humorFlavorSteps),
+    fetchTable(TABLES.humorFlavorMix),
+    fetchTable(TABLES.terms),
+    fetchTable(TABLES.captions),
+    fetchTable(TABLES.captionRequests),
+    fetchTable(TABLES.captionExamples),
+    fetchTable(TABLES.llmModels),
+    fetchTable(TABLES.llmProviders),
+    fetchTable(TABLES.llmPromptChains),
+    fetchTable(TABLES.llmResponses),
+    fetchTable(TABLES.allowedSignupDomains),
+    fetchTable(TABLES.whitelistedEmailAddresses)
+  ])
+
+  const toResult = (item: PromiseSettledResult<TableResult>, key: string): TableResult =>
+    item.status === 'fulfilled'
+      ? item.value
+      : {
+          rows: [],
+          error: item.reason instanceof Error ? item.reason.message : `Failed to fetch ${key}`,
+          resolvedTable: key
+        }
 
   const [
     profiles,
@@ -296,23 +309,23 @@ export default async function Home() {
     llmResponses,
     allowedSignupDomains,
     whitelistedEmailAddresses
-  ] = await Promise.all([
-    fetchTable(TABLES.profiles),
-    fetchTable(TABLES.images),
-    fetchTable(TABLES.humorFlavors),
-    fetchTable(TABLES.humorFlavorSteps),
-    fetchTable(TABLES.humorFlavorMix),
-    fetchTable(TABLES.terms),
-    fetchTable(TABLES.captions),
-    fetchTable(TABLES.captionRequests),
-    fetchTable(TABLES.captionExamples),
-    fetchTable(TABLES.llmModels),
-    fetchTable(TABLES.llmProviders),
-    fetchTable(TABLES.llmPromptChains),
-    fetchTable(TABLES.llmResponses),
-    fetchTable(TABLES.allowedSignupDomains),
-    fetchTable(TABLES.whitelistedEmailAddresses)
-  ])
+  ] = [
+    toResult(settled[0], TABLES.profiles.key),
+    toResult(settled[1], TABLES.images.key),
+    toResult(settled[2], TABLES.humorFlavors.key),
+    toResult(settled[3], TABLES.humorFlavorSteps.key),
+    toResult(settled[4], TABLES.humorFlavorMix.key),
+    toResult(settled[5], TABLES.terms.key),
+    toResult(settled[6], TABLES.captions.key),
+    toResult(settled[7], TABLES.captionRequests.key),
+    toResult(settled[8], TABLES.captionExamples.key),
+    toResult(settled[9], TABLES.llmModels.key),
+    toResult(settled[10], TABLES.llmProviders.key),
+    toResult(settled[11], TABLES.llmPromptChains.key),
+    toResult(settled[12], TABLES.llmResponses.key),
+    toResult(settled[13], TABLES.allowedSignupDomains.key),
+    toResult(settled[14], TABLES.whitelistedEmailAddresses.key)
+  ]
 
   const allErrors = [
     [profiles.resolvedTable, profiles.error],
@@ -362,13 +375,7 @@ export default async function Home() {
           </section>
         ) : null}
 
-        <CrudSection
-          includeCreate={false}
-          rows={images.rows}
-          subtitle="Create image rows using the quick upload form, then update/delete existing rows below."
-          table={images.resolvedTable}
-          title="Images (Create / Read / Update / Delete)"
-        />
+        <CrudSection includeCreate={false} rows={images.rows} subtitle="Create image rows using the quick upload form, then update/delete existing rows below." table={images.resolvedTable} title="Images (Create / Read / Update / Delete)" />
 
         <Section title="Upload New Image" subtitle="Create new image records using URL + optional description/profile.">
           <form action={createImageRow} className="grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
@@ -417,7 +424,6 @@ export default async function Home() {
         </Section>
 
         <CrudSection rows={allowedSignupDomains.rows} subtitle="Create, read, update, and delete allowed signup domains." table={allowedSignupDomains.resolvedTable} title="Allowed Signup Domains (CRUD)" />
-        <CrudSection rows={whitelistedEmailAddresses.rows} subtitle="Create, read, update, and delete whitelisted e-mail addresses." table={whitelistedEmailAddresses.resolvedTable} title="Whitelisted E-mail Addresses (CRUD)" />
       </main>
     </div>
   )
