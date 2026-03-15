@@ -32,7 +32,7 @@ const TABLES: Record<string, TableConfig> = {
   llmPromptChains: { key: 'llm_prompt_chains', label: 'llm_prompt_chains', sortColumn: 'created_datetime_utc' },
   llmResponses: { key: 'llm_model_responses', label: 'llm_model_responses' },
   allowedSignupDomains: { key: 'allowed_signup_domains', label: 'allowed_signup_domains', sortColumn: 'created_datetime_utc' },
-  whitelistedEmailAddresses: { key: 'whitelisted_email_addresses', label: 'whitelisted_email_addresses', missingTableIsEmpty: true }
+  whitelistedEmailAddresses: { key: 'whitelist_email_addresses', label: 'whitelist_email_addresses', sortColumn: 'created_datetime_utc' }
 }
 
 function asText(value: unknown): string {
@@ -72,6 +72,16 @@ async function createGenericRow(formData: FormData) {
   if (!table) return
 
   const payload = parsePayload(formData.get('payload'))
+
+  if (table === TABLES.whitelistedEmailAddresses.key) {
+    if ('email' in payload && !('email_address' in payload)) {
+      payload.email_address = payload.email
+      delete payload.email
+    }
+    payload.created_datetime_utc = payload.created_datetime_utc ?? new Date().toISOString()
+    payload.modified_datetime_utc = payload.modified_datetime_utc ?? new Date().toISOString()
+  }
+
   await supabase.from(table).insert(payload)
   revalidatePath('/')
 }
@@ -86,6 +96,14 @@ async function updateGenericRow(formData: FormData) {
   const payload = parsePayload(formData.get('payload'))
 
   if (table === TABLES.images.key) {
+    payload.modified_datetime_utc = new Date().toISOString()
+  }
+
+  if (table === TABLES.whitelistedEmailAddresses.key) {
+    if ('email' in payload && !('email_address' in payload)) {
+      payload.email_address = payload.email
+      delete payload.email
+    }
     payload.modified_datetime_utc = new Date().toISOString()
   }
 
@@ -424,6 +442,14 @@ export default async function Home() {
         </Section>
 
         <CrudSection rows={allowedSignupDomains.rows} subtitle="Create, read, update, and delete allowed signup domains." table={allowedSignupDomains.resolvedTable} title="Allowed Signup Domains (CRUD)" />
+
+        <CrudSection
+          rows={whitelistedEmailAddresses.rows}
+          subtitle="Create, read, update, and delete whitelist email addresses using email_address + datetime columns."
+          table={whitelistedEmailAddresses.resolvedTable}
+          title="Whitelist Email Addresses (CRUD)"
+          preferred={['id', 'email_address', 'created_datetime_utc', 'modified_datetime_utc']}
+        />
       </main>
     </div>
   )
