@@ -3,11 +3,19 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { CaptionRequestsSection } from '@/components/sections/caption-requests-section'
+import { CaptionExamplesSection } from '@/components/sections/caption-examples-section'
 import { CaptionsSection } from '@/components/sections/captions-section'
 import { FlavorsSection } from '@/components/sections/flavors-section'
 import { HumorMixSection } from '@/components/sections/humor-mix-section'
 import { ImagesSection } from '@/components/sections/images-section'
+import { AllowedDomainsSection } from '@/components/sections/allowed-domains-section'
+import { LlmModelsSection } from '@/components/sections/llm-models-section'
+import { LlmProvidersSection } from '@/components/sections/llm-providers-section'
+import { PromptChainsSection } from '@/components/sections/prompt-chains-section'
+import { ResponsesSection } from '@/components/sections/responses-section'
+import { TermsSection } from '@/components/sections/terms-section'
 import { UsersSection } from '@/components/sections/users-section'
+import { WhitelistedEmailsSection } from '@/components/sections/whitelisted-emails-section'
 
 type GenericRow = Record<string, unknown>
 
@@ -233,6 +241,171 @@ async function updateHumorMixRow(formData: FormData) {
   revalidatePath('/')
 }
 
+async function createTerm(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const term = String(formData.get('term') ?? '').trim()
+  if (!term) return
+
+  await supabase.from(TABLES.terms.key).insert({
+    term,
+    type: String(formData.get('type') ?? '').trim() || null,
+    is_active: Boolean(formData.get('is_active')),
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  })
+  revalidatePath('/')
+}
+
+async function updateTerm(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  await supabase
+    .from(TABLES.terms.key)
+    .update({
+      term: String(formData.get('term') ?? '').trim(),
+      type: String(formData.get('type') ?? '').trim() || null,
+      is_active: Boolean(formData.get('is_active')),
+      modified_datetime_utc: new Date().toISOString()
+    })
+    .eq('id', id)
+  revalidatePath('/')
+}
+
+async function deleteTerm(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+  await supabase.from(TABLES.terms.key).delete().eq('id', id)
+  revalidatePath('/')
+}
+
+async function updateModel(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  await supabase
+    .from(TABLES.llmModels.key)
+    .update({
+      model_name: String(formData.get('model_name') ?? '').trim() || null,
+      provider: String(formData.get('provider') ?? '').trim() || null,
+      is_active: Boolean(formData.get('is_active')),
+      modified_datetime_utc: new Date().toISOString()
+    })
+    .eq('id', id)
+  revalidatePath('/')
+}
+
+async function createProvider(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  await supabase.from(TABLES.llmProviders.key).insert({
+    name,
+    status: String(formData.get('status') ?? '').trim() || null,
+    is_active: Boolean(formData.get('is_active')),
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  })
+  revalidatePath('/')
+}
+
+async function updateProvider(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  await supabase
+    .from(TABLES.llmProviders.key)
+    .update({
+      name: String(formData.get('name') ?? '').trim() || null,
+      status: String(formData.get('status') ?? '').trim() || null,
+      is_active: Boolean(formData.get('is_active')),
+      modified_datetime_utc: new Date().toISOString()
+    })
+    .eq('id', id)
+  revalidatePath('/')
+}
+
+async function deleteProvider(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+  await supabase.from(TABLES.llmProviders.key).delete().eq('id', id)
+  revalidatePath('/')
+}
+
+async function createDomain(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const domain = String(formData.get('domain') ?? '').trim()
+  if (!domain) return
+
+  await supabase.from(TABLES.allowedSignupDomains.key).insert({
+    domain,
+    is_active: true,
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  })
+  revalidatePath('/')
+}
+
+async function toggleDomain(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+  const isActive = String(formData.get('is_active') ?? 'true') === 'true'
+
+  await supabase
+    .from(TABLES.allowedSignupDomains.key)
+    .update({ is_active: isActive, modified_datetime_utc: new Date().toISOString() })
+    .eq('id', id)
+  revalidatePath('/')
+}
+
+async function deleteDomain(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+  await supabase.from(TABLES.allowedSignupDomains.key).delete().eq('id', id)
+  revalidatePath('/')
+}
+
+async function createWhitelistedEmail(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const emailAddress = String(formData.get('email_address') ?? '').trim()
+  if (!emailAddress) return
+
+  await supabase.from(TABLES.whitelistedEmailAddresses.key).insert({
+    email_address: emailAddress,
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  })
+  revalidatePath('/')
+}
+
+async function deleteWhitelistedEmail(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+  await supabase.from(TABLES.whitelistedEmailAddresses.key).delete().eq('id', id)
+  revalidatePath('/')
+}
+
 export default async function Home({
   searchParams
 }: {
@@ -421,10 +594,10 @@ export default async function Home({
             <p className="mt-1 text-xs text-slate-300">Creative operations and moderation workspace.</p>
           </div>
 
-          <nav className="space-y-5">
+          <nav className="space-y-4">
             {NAV_GROUPS.map((group) => (
-              <section key={group.title}>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{group.title}</p>
+              <details key={group.title} open>
+                <summary className="mb-2 cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-slate-400">{group.title}</summary>
                 <div className="space-y-1">
                   {group.items.map((item) => {
                     const active = selectedView === item.id
@@ -442,7 +615,7 @@ export default async function Home({
                     )
                   })}
                 </div>
-              </section>
+              </details>
             ))}
           </nav>
         </aside>
@@ -451,7 +624,7 @@ export default async function Home({
           <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
             <div className="mx-auto flex w-[95%] max-w-6xl items-center justify-between py-4">
               <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">{selectedItem?.label ?? 'Dashboard'}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Studio Console / {selectedItem?.label ?? 'Dashboard'}</p>
                 <h2 className="text-2xl font-bold text-slate-900">Welcome back, {user?.email ?? 'Admin'}.</h2>
               </div>
               <form action={signOut}>
@@ -507,7 +680,7 @@ export default async function Home({
                     { label: 'Total Captions', value: totalCaptions, tone: 'from-emerald-50 to-teal-50', text: 'text-emerald-700' },
                     { label: 'Avg Captions / Image', value: avgCaptionsPerImage, tone: 'from-amber-50 to-orange-50', text: 'text-amber-700' }
                   ].map((metric) => (
-                    <article key={metric.label} className={`rounded-2xl border border-slate-200 bg-gradient-to-br ${metric.tone} p-5 shadow-sm`}>
+                    <article key={metric.label} className={`rounded-2xl border border-slate-200 bg-gradient-to-br ${metric.tone} p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md`}>
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{metric.label}</p>
                       <p className={`mt-2 text-3xl font-bold ${metric.text}`}>{metric.value}</p>
                     </article>
@@ -614,14 +787,28 @@ export default async function Home({
             {selectedView === 'caption-requests' ? <CaptionRequestsSection rows={captionRequests.rows} /> : null}
             {selectedView === 'flavors' || selectedView === 'flavor-steps' ? <FlavorsSection flavors={humorFlavors.rows} steps={humorFlavorSteps.rows} /> : null}
             {selectedView === 'humor-mix' ? <HumorMixSection rows={humorFlavorMix.rows} updateHumorMixRow={updateHumorMixRow} /> : null}
+            {selectedView === 'caption-examples' ? <CaptionExamplesSection rows={captionExamples.rows} /> : null}
+            {selectedView === 'terms' ? <TermsSection createTerm={createTerm} deleteTerm={deleteTerm} rows={terms.rows} updateTerm={updateTerm} /> : null}
+            {selectedView === 'models' ? <LlmModelsSection rows={llmModels.rows} updateModel={updateModel} /> : null}
+            {selectedView === 'providers' ? <LlmProvidersSection createProvider={createProvider} deleteProvider={deleteProvider} rows={llmProviders.rows} updateProvider={updateProvider} /> : null}
+            {selectedView === 'prompt-chains' ? <PromptChainsSection rows={llmPromptChains.rows} /> : null}
+            {selectedView === 'responses' ? <ResponsesSection rows={llmResponses.rows} /> : null}
+            {selectedView === 'allowed-domains' ? <AllowedDomainsSection createDomain={createDomain} deleteDomain={deleteDomain} rows={allowedSignupDomains.rows} toggleDomain={toggleDomain} /> : null}
+            {selectedView === 'whitelisted-emails' ? <WhitelistedEmailsSection createEmail={createWhitelistedEmail} deleteEmail={deleteWhitelistedEmail} rows={whitelistedEmailAddresses.rows} /> : null}
 
-            {['terms', 'caption-examples', 'models', 'providers', 'prompt-chains', 'responses', 'allowed-domains', 'whitelisted-emails'].includes(selectedView) ? (
+            {false ? (
               <SectionCard title={selectedItem?.label ?? 'Workspace'} subtitle={selectedItem?.description ?? 'Section workspace'}>
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
                   <p className="text-sm font-semibold text-slate-700">Phase 4 placeholder</p>
                   <p className="mt-1 text-sm text-slate-600">This section is intentionally queued for the next phase to keep Phase 3 focused on requested modules.</p>
                 </div>
               </SectionCard>
+            ) : null}
+
+            {['images', 'terms', 'providers', 'allowed-domains', 'whitelisted-emails'].includes(selectedView) ? (
+              <a className="fixed bottom-6 right-6 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-indigo-700" href="#quick-create">
+                + Quick Create
+              </a>
             ) : null}
           </main>
         </div>
