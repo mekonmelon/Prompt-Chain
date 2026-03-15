@@ -260,7 +260,7 @@ export default async function Home() {
 
   const fetchTable = async (config: TableConfig): Promise<TableResult> => {
     try {
-      let query = supabase.from(config.key).select('*')
+      let query = supabase.from(config.key).select('*').limit(50)
       if (config.sortColumn) {
         query = query.order(config.sortColumn, { ascending: false })
       }
