@@ -1,7 +1,13 @@
 import Image from 'next/image'
-import type { ReactNode } from 'react'
+import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { CaptionRequestsSection } from '@/components/sections/caption-requests-section'
+import { CaptionsSection } from '@/components/sections/captions-section'
+import { FlavorsSection } from '@/components/sections/flavors-section'
+import { HumorMixSection } from '@/components/sections/humor-mix-section'
+import { ImagesSection } from '@/components/sections/images-section'
+import { UsersSection } from '@/components/sections/users-section'
 
 type GenericRow = Record<string, unknown>
 
@@ -47,10 +53,7 @@ const TABLES: Record<string, TableConfig> = {
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  {
-    title: 'Overview',
-    items: [{ id: 'dashboard', label: 'Dashboard', description: 'Studio activity and health.' }]
-  },
+  { title: 'Overview', items: [{ id: 'dashboard', label: 'Dashboard', description: 'Studio activity and health.' }] },
   {
     title: 'Content',
     items: [
@@ -64,8 +67,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Humor Pipeline',
     items: [
-      { id: 'flavors', label: 'Flavors', description: 'Humor flavor catalog.' },
-      { id: 'flavor-steps', label: 'Flavor Steps', description: 'Prompt step definitions per flavor.' },
+      { id: 'flavors', label: 'Flavors', description: 'Humor flavor catalog + steps.' },
+      { id: 'flavor-steps', label: 'Flavor Steps', description: 'Step timeline per selected flavor.' },
       { id: 'humor-mix', label: 'Humor Mix', description: 'Default flavor blend configuration.' }
     ]
   },
@@ -121,7 +124,7 @@ function isViewValid(view: string) {
   return NAV_GROUPS.some((group) => group.items.some((item) => item.id === view))
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4">
@@ -138,6 +141,96 @@ async function signOut() {
   const supabase = createClient()
   await supabase.auth.signOut()
   redirect('/login')
+}
+
+async function createImageRow(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const {
+    data: { user }
+  } = await supabase.auth.getUser()
+
+  const url = String(formData.get('url') ?? '').trim()
+  const description = String(formData.get('description') ?? '').trim()
+  const profileId = String(formData.get('profile_id') ?? '').trim() || user?.id
+  if (!url) return
+
+  const payload: GenericRow = {
+    url,
+    image_description: description,
+    created_datetime_utc: new Date().toISOString(),
+    modified_datetime_utc: new Date().toISOString()
+  }
+
+  if (profileId) payload.profile_id = profileId
+
+  await supabase.from(TABLES.images.key).insert(payload)
+  revalidatePath('/')
+}
+
+async function updateImageRow(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  const payload: GenericRow = {
+    modified_datetime_utc: new Date().toISOString()
+  }
+
+  const url = String(formData.get('url') ?? '').trim()
+  const imageDescription = String(formData.get('image_description') ?? '').trim()
+  const profileId = String(formData.get('profile_id') ?? '').trim()
+
+  if (url) payload.url = url
+  payload.image_description = imageDescription
+  if (profileId) payload.profile_id = profileId
+
+  await supabase.from(TABLES.images.key).update(payload).eq('id', id)
+  revalidatePath('/')
+}
+
+async function deleteImageRow(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  await supabase.from(TABLES.images.key).delete().eq('id', id)
+  revalidatePath('/')
+}
+
+async function updateHumorMixRow(formData: FormData) {
+  'use server'
+  const supabase = createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) return
+
+  const payloadRaw = String(formData.get('payload') ?? '{}')
+  let payload: GenericRow = {}
+  try {
+    const parsed = JSON.parse(payloadRaw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      payload = parsed
+    }
+  } catch {
+    payload = {}
+  }
+
+  const flavorId = String(formData.get('flavor_id') ?? '').trim()
+  const captionCount = String(formData.get('caption_count') ?? '').trim()
+
+  if (flavorId) {
+    payload.flavor_id = flavorId
+  }
+  if (captionCount) {
+    const numericCount = Number(captionCount)
+    payload.caption_count = Number.isFinite(numericCount) ? numericCount : captionCount
+  }
+  payload.modified_datetime_utc = new Date().toISOString()
+
+  await supabase.from(TABLES.humorFlavorMix.key).update(payload).eq('id', id)
+  revalidatePath('/')
 }
 
 export default async function Home({
@@ -161,11 +254,7 @@ export default async function Home({
       }
 
       const { data, error } = await query
-
-      if (error) {
-        return { rows: [], error: error.message, resolvedTable: config.key }
-      }
-
+      if (error) return { rows: [], error: error.message, resolvedTable: config.key }
       return { rows: (data ?? []) as GenericRow[], error: null, resolvedTable: config.key }
     } catch (error) {
       return {
@@ -203,23 +292,7 @@ export default async function Home({
           resolvedTable: key
         }
 
-  const [
-    profiles,
-    images,
-    humorFlavors,
-    humorFlavorSteps,
-    humorFlavorMix,
-    terms,
-    captions,
-    captionRequests,
-    captionExamples,
-    llmModels,
-    llmProviders,
-    llmPromptChains,
-    llmResponses,
-    allowedSignupDomains,
-    whitelistedEmailAddresses
-  ] = [
+  const [profiles, images, humorFlavors, humorFlavorSteps, humorFlavorMix, terms, captions, captionRequests, captionExamples, llmModels, llmProviders, llmPromptChains, llmResponses, allowedSignupDomains, whitelistedEmailAddresses] = [
     toResult(settled[0], TABLES.profiles.key),
     toResult(settled[1], TABLES.images.key),
     toResult(settled[2], TABLES.humorFlavors.key),
@@ -288,18 +361,10 @@ export default async function Home({
   const totalWhitelistEmails = totalWhitelistCount ?? 0
   const avgCaptionsPerImage = totalImages ? (totalCaptions / totalImages).toFixed(2) : '0.00'
 
-  const { data: topCaptionCandidates } = await supabase
-    .from(TABLES.captions.key)
-    .select('id, content, image_id, created_datetime_utc')
-    .order('created_datetime_utc', { ascending: false })
-    .limit(200)
-
+  const { data: topCaptionCandidates } = await supabase.from(TABLES.captions.key).select('id, content, image_id, created_datetime_utc').order('created_datetime_utc', { ascending: false }).limit(200)
   const topCaptionRows = (topCaptionCandidates ?? []) as GenericRow[]
   const candidateCaptionIds = topCaptionRows.map((row) => getRowId(row)).filter(Boolean)
-
-  const { data: voteRows } = candidateCaptionIds.length
-    ? await supabase.from('caption_votes').select('caption_id, vote_value').in('caption_id', candidateCaptionIds)
-    : { data: [] as GenericRow[] }
+  const { data: voteRows } = candidateCaptionIds.length ? await supabase.from('caption_votes').select('caption_id, vote_value').in('caption_id', candidateCaptionIds) : { data: [] as GenericRow[] }
 
   const voteRowsSafe = (voteRows ?? []) as GenericRow[]
   const votesByCaption = voteRowsSafe.reduce<Record<string, number>>((acc, vote) => {
@@ -312,12 +377,7 @@ export default async function Home({
   const topCaptions = topCaptionRows
     .map((caption) => {
       const id = getRowId(caption)
-      return {
-        id,
-        imageId: asText(caption.image_id),
-        text: getCaptionText(caption),
-        votes: id ? votesByCaption[id] ?? 0 : 0
-      }
+      return { id, imageId: asText(caption.image_id), text: getCaptionText(caption), votes: id ? votesByCaption[id] ?? 0 : 0 }
     })
     .sort((a, b) => b.votes - a.votes)
     .slice(0, 5)
@@ -337,16 +397,12 @@ export default async function Home({
     return { key, label: getChartDay(date), value: 0 }
   })
   const dateIndex = new Map(dateSeries.map((day, index) => [day.key, index]))
-
   topCaptionRows.forEach((row) => {
     const raw = asText(row.created_datetime_utc)
     const key = raw.slice(0, 10)
     const idx = dateIndex.get(key)
-    if (idx !== undefined) {
-      dateSeries[idx].value += 1
-    }
+    if (idx !== undefined) dateSeries[idx].value += 1
   })
-
   const maxActivity = Math.max(...dateSeries.map((day) => day.value), 1)
 
   const upvotes = voteRowsSafe.filter((row) => getVoteValue(row) > 0).length
@@ -422,17 +478,12 @@ export default async function Home({
 
             {selectedView === 'dashboard' ? (
               <>
-                <SectionCard
-                  title="Humor Studio Pulse"
-                  subtitle="A live editorial view of your caption pipeline, creative throughput, and moderation readiness."
-                >
+                <SectionCard title="Humor Studio Pulse" subtitle="A live editorial view of your caption pipeline, creative throughput, and moderation readiness.">
                   <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
                     <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-violet-500 p-5 text-white">
                       <p className="text-xs uppercase tracking-[0.2em] text-indigo-100">Overview Brief</p>
                       <h3 className="mt-2 text-2xl font-bold">Creative Ops Studio</h3>
-                      <p className="mt-2 max-w-xl text-sm text-indigo-100">
-                        Track caption quality, generation throughput, and governance controls from one unified workspace for the Humor Project team.
-                      </p>
+                      <p className="mt-2 max-w-xl text-sm text-indigo-100">Track caption quality, generation throughput, and governance controls from one unified workspace for the Humor Project team.</p>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
                       <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -525,18 +576,9 @@ export default async function Home({
                 <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
                   <SectionCard title="Vote & Request Summary" subtitle="Operational quality signals from vote balance and request throughput.">
                     <div className="grid gap-3 sm:grid-cols-3">
-                      <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                        <p className="text-xs uppercase tracking-wide text-emerald-700">Upvotes</p>
-                        <p className="mt-1 text-2xl font-bold text-emerald-800">{upvotes}</p>
-                      </article>
-                      <article className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                        <p className="text-xs uppercase tracking-wide text-rose-700">Downvotes</p>
-                        <p className="mt-1 text-2xl font-bold text-rose-800">{downvotes}</p>
-                      </article>
-                      <article className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                        <p className="text-xs uppercase tracking-wide text-indigo-700">Net Vote</p>
-                        <p className="mt-1 text-2xl font-bold text-indigo-800">{netVotes}</p>
-                      </article>
+                      <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-xs uppercase tracking-wide text-emerald-700">Upvotes</p><p className="mt-1 text-2xl font-bold text-emerald-800">{upvotes}</p></article>
+                      <article className="rounded-xl border border-rose-200 bg-rose-50 p-4"><p className="text-xs uppercase tracking-wide text-rose-700">Downvotes</p><p className="mt-1 text-2xl font-bold text-rose-800">{downvotes}</p></article>
+                      <article className="rounded-xl border border-indigo-200 bg-indigo-50 p-4"><p className="text-xs uppercase tracking-wide text-indigo-700">Net Vote</p><p className="mt-1 text-2xl font-bold text-indigo-800">{netVotes}</p></article>
                     </div>
                     <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
                       <p className="text-xs uppercase tracking-wide text-slate-500">Queue Status</p>
@@ -551,7 +593,7 @@ export default async function Home({
                         { label: 'Images', view: 'images', hint: 'Upload and moderate image records.' },
                         { label: 'Caption Requests', view: 'caption-requests', hint: 'Triage request pipeline.' },
                         { label: 'Flavors', view: 'flavors', hint: 'Adjust humor strategy.' },
-                        { label: 'Models', view: 'models', hint: 'Manage LLM capabilities.' },
+                        { label: 'Humor Mix', view: 'humor-mix', hint: 'Tune default flavor logic.' },
                         { label: 'Users', view: 'users', hint: 'Review admin access.' },
                         { label: 'Whitelisted Emails', view: 'whitelisted-emails', hint: 'Refine invite permissions.' }
                       ].map((link) => (
@@ -564,16 +606,23 @@ export default async function Home({
                   </SectionCard>
                 </section>
               </>
-            ) : (
+            ) : null}
+
+            {selectedView === 'users' ? <UsersSection rows={profiles.rows} /> : null}
+            {selectedView === 'images' ? <ImagesSection createImageRow={createImageRow} deleteImageRow={deleteImageRow} rows={images.rows} updateImageRow={updateImageRow} /> : null}
+            {selectedView === 'captions' ? <CaptionsSection rows={captions.rows} voteScores={votesByCaption} /> : null}
+            {selectedView === 'caption-requests' ? <CaptionRequestsSection rows={captionRequests.rows} /> : null}
+            {selectedView === 'flavors' || selectedView === 'flavor-steps' ? <FlavorsSection flavors={humorFlavors.rows} steps={humorFlavorSteps.rows} /> : null}
+            {selectedView === 'humor-mix' ? <HumorMixSection rows={humorFlavorMix.rows} updateHumorMixRow={updateHumorMixRow} /> : null}
+
+            {['terms', 'caption-examples', 'models', 'providers', 'prompt-chains', 'responses', 'allowed-domains', 'whitelisted-emails'].includes(selectedView) ? (
               <SectionCard title={selectedItem?.label ?? 'Workspace'} subtitle={selectedItem?.description ?? 'Section workspace'}>
                 <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                  <p className="text-sm font-semibold text-slate-700">Phase 3 placeholder</p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    This workspace shell is ready. The dedicated CRUD/read modules for <span className="font-semibold">{selectedItem?.label ?? selectedView}</span> will plug into this panel in the next phase.
-                  </p>
+                  <p className="text-sm font-semibold text-slate-700">Phase 4 placeholder</p>
+                  <p className="mt-1 text-sm text-slate-600">This section is intentionally queued for the next phase to keep Phase 3 focused on requested modules.</p>
                 </div>
               </SectionCard>
-            )}
+            ) : null}
           </main>
         </div>
       </div>
