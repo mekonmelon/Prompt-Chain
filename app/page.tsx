@@ -20,7 +20,6 @@ type TableConfig = {
 const TABLES: Record<string, TableConfig> = {
   profiles: { key: 'profiles', label: 'profiles', sortColumn: 'created_datetime_utc' },
   images: { key: 'images', label: 'images', sortColumn: 'created_datetime_utc' },
-  captionVotes: { key: 'caption_votes', label: 'caption_votes' },
   humorFlavors: { key: 'humor_flavors', label: 'humor_flavors' },
   humorFlavorSteps: { key: 'humor_flavor_steps', label: 'humor_flavor_steps' },
   humorFlavorMix: { key: 'humor_flavor_mix', label: 'humor_flavor_mix', sortColumn: 'created_datetime_utc' },
@@ -73,6 +72,12 @@ function getRowId(row: GenericRow) {
 
 function getCaptionId(row: GenericRow) {
   return asText(row.caption_id || row.captionId)
+}
+
+function getVoteValue(row: GenericRow) {
+  const raw = row.vote_value ?? row.value ?? 0
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 function getFlavorId(row: GenericRow) {
@@ -322,7 +327,6 @@ export default async function Home({
   const settled = await Promise.allSettled([
     fetchTable(TABLES.profiles),
     fetchTable(TABLES.images),
-    fetchTable(TABLES.captionVotes),
     fetchTable(TABLES.humorFlavors),
     fetchTable(TABLES.humorFlavorSteps),
     fetchTable(TABLES.humorFlavorMix),
@@ -350,7 +354,6 @@ export default async function Home({
   const [
     profiles,
     images,
-    captionVotes,
     humorFlavors,
     humorFlavorSteps,
     humorFlavorMix,
@@ -367,26 +370,24 @@ export default async function Home({
   ] = [
     toResult(settled[0], TABLES.profiles.key),
     toResult(settled[1], TABLES.images.key),
-    toResult(settled[2], TABLES.captionVotes.key),
-    toResult(settled[3], TABLES.humorFlavors.key),
-    toResult(settled[4], TABLES.humorFlavorSteps.key),
-    toResult(settled[5], TABLES.humorFlavorMix.key),
-    toResult(settled[6], TABLES.terms.key),
-    toResult(settled[7], TABLES.captions.key),
-    toResult(settled[8], TABLES.captionRequests.key),
-    toResult(settled[9], TABLES.captionExamples.key),
-    toResult(settled[10], TABLES.llmModels.key),
-    toResult(settled[11], TABLES.llmProviders.key),
-    toResult(settled[12], TABLES.llmPromptChains.key),
-    toResult(settled[13], TABLES.llmResponses.key),
-    toResult(settled[14], TABLES.allowedSignupDomains.key),
-    toResult(settled[15], TABLES.whitelistedEmailAddresses.key)
+    toResult(settled[2], TABLES.humorFlavors.key),
+    toResult(settled[3], TABLES.humorFlavorSteps.key),
+    toResult(settled[4], TABLES.humorFlavorMix.key),
+    toResult(settled[5], TABLES.terms.key),
+    toResult(settled[6], TABLES.captions.key),
+    toResult(settled[7], TABLES.captionRequests.key),
+    toResult(settled[8], TABLES.captionExamples.key),
+    toResult(settled[9], TABLES.llmModels.key),
+    toResult(settled[10], TABLES.llmProviders.key),
+    toResult(settled[11], TABLES.llmPromptChains.key),
+    toResult(settled[12], TABLES.llmResponses.key),
+    toResult(settled[13], TABLES.allowedSignupDomains.key),
+    toResult(settled[14], TABLES.whitelistedEmailAddresses.key)
   ]
 
   const allErrors = [
     [profiles.resolvedTable, profiles.error],
     [images.resolvedTable, images.error],
-    [captionVotes.resolvedTable, captionVotes.error],
     [humorFlavors.resolvedTable, humorFlavors.error],
     [humorFlavorSteps.resolvedTable, humorFlavorSteps.error],
     [humorFlavorMix.resolvedTable, humorFlavorMix.error],
@@ -402,24 +403,47 @@ export default async function Home({
     [whitelistedEmailAddresses.resolvedTable, whitelistedEmailAddresses.error]
   ].filter(([, error]) => Boolean(error))
 
-  const totalUsers = profiles.rows.length
-  const totalImages = images.rows.length
-  const avgCaptionsPerImage = totalImages ? (captions.rows.length / totalImages).toFixed(2) : '0.00'
+  const [{ count: totalUsersCount }, { count: totalImagesCount }, { count: totalCaptionsCount }] = await Promise.all([
+    supabase.from(TABLES.profiles.key).select('*', { count: 'exact', head: true }),
+    supabase.from(TABLES.images.key).select('*', { count: 'exact', head: true }),
+    supabase.from(TABLES.captions.key).select('*', { count: 'exact', head: true })
+  ])
 
-  const votesByCaption = captionVotes.rows.reduce<Record<string, number>>((acc, vote) => {
+  const totalUsers = totalUsersCount ?? 0
+  const totalImages = totalImagesCount ?? 0
+  const totalCaptions = totalCaptionsCount ?? 0
+  const avgCaptionsPerImage = totalImages ? (totalCaptions / totalImages).toFixed(2) : '0.00'
+
+  const { data: topCaptionCandidates } = await supabase
+    .from(TABLES.captions.key)
+    .select('id, content, image_id')
+    .order('created_datetime_utc', { ascending: false })
+    .limit(200)
+
+  const topCaptionRows = (topCaptionCandidates ?? []) as GenericRow[]
+  const candidateCaptionIds = topCaptionRows.map((row) => getRowId(row)).filter(Boolean)
+
+  const { data: voteRows } = candidateCaptionIds.length
+    ? await supabase
+        .from('caption_votes')
+        .select('caption_id, vote_value')
+        .in('caption_id', candidateCaptionIds)
+    : { data: [] as GenericRow[] }
+
+  const votesByCaption = ((voteRows ?? []) as GenericRow[]).reduce<Record<string, number>>((acc, vote) => {
     const captionId = getCaptionId(vote)
     if (!captionId) return acc
-    acc[captionId] = (acc[captionId] ?? 0) + 1
+    acc[captionId] = (acc[captionId] ?? 0) + getVoteValue(vote)
     return acc
   }, {})
 
-  const topCaptions = captions.rows
+  const topCaptions = topCaptionRows
     .map((caption) => {
       const id = getRowId(caption)
       return {
         id,
         text: getCaptionText(caption),
-        votes: votesByCaption[id] ?? 0
+        votes: id ? votesByCaption[id] ?? 0 : 0
       }
     })
     .sort((a, b) => b.votes - a.votes)
