@@ -1,4 +1,4 @@
-# The Humor Project Admin Panel
+# The Humor Project Admin Panel .
 
 Next.js admin panel connected to Supabase with Google OAuth and superadmin-only access.
 
