@@ -1,7 +1,7 @@
 import Image from 'next/image'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, requireCurrentProfileId } from '@/lib/supabase/server'
 import { CaptionRequestsSection } from '@/components/sections/caption-requests-section'
 import { CaptionExamplesSection } from '@/components/sections/caption-examples-section'
 import { CaptionsSection } from '@/components/sections/captions-section'
@@ -154,18 +154,18 @@ async function signOut() {
 async function createImageRow(formData: FormData) {
   'use server'
   const supabase = createClient()
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
+  const currentProfileId = await requireCurrentProfileId(supabase)
 
   const url = String(formData.get('url') ?? '').trim()
   const description = String(formData.get('description') ?? '').trim()
-  const profileId = String(formData.get('profile_id') ?? '').trim() || user?.id
+  const profileId = String(formData.get('profile_id') ?? '').trim() || currentProfileId
   if (!url) return
 
   const payload: GenericRow = {
     url,
     image_description: description,
+    created_by_user_id: currentProfileId,
+    modified_by_user_id: currentProfileId,
     created_datetime_utc: new Date().toISOString(),
     modified_datetime_utc: new Date().toISOString()
   }
@@ -179,10 +179,12 @@ async function createImageRow(formData: FormData) {
 async function updateImageRow(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
   const payload: GenericRow = {
+    modified_by_user_id: currentProfileId,
     modified_datetime_utc: new Date().toISOString()
   }
 
@@ -211,6 +213,7 @@ async function deleteImageRow(formData: FormData) {
 async function updateHumorMixRow(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
@@ -235,6 +238,7 @@ async function updateHumorMixRow(formData: FormData) {
     const numericCount = Number(captionCount)
     payload.caption_count = Number.isFinite(numericCount) ? numericCount : captionCount
   }
+  payload.modified_by_user_id = currentProfileId
   payload.modified_datetime_utc = new Date().toISOString()
 
   await supabase.from(TABLES.humorFlavorMix.key).update(payload).eq('id', id)
@@ -244,6 +248,7 @@ async function updateHumorMixRow(formData: FormData) {
 async function createTerm(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const term = String(formData.get('term') ?? '').trim()
   if (!term) return
 
@@ -251,6 +256,8 @@ async function createTerm(formData: FormData) {
     term,
     type: String(formData.get('type') ?? '').trim() || null,
     is_active: Boolean(formData.get('is_active')),
+    created_by_user_id: currentProfileId,
+    modified_by_user_id: currentProfileId,
     created_datetime_utc: new Date().toISOString(),
     modified_datetime_utc: new Date().toISOString()
   })
@@ -260,6 +267,7 @@ async function createTerm(formData: FormData) {
 async function updateTerm(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
@@ -269,6 +277,7 @@ async function updateTerm(formData: FormData) {
       term: String(formData.get('term') ?? '').trim(),
       type: String(formData.get('type') ?? '').trim() || null,
       is_active: Boolean(formData.get('is_active')),
+      modified_by_user_id: currentProfileId,
       modified_datetime_utc: new Date().toISOString()
     })
     .eq('id', id)
@@ -287,6 +296,7 @@ async function deleteTerm(formData: FormData) {
 async function updateModel(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
@@ -296,6 +306,7 @@ async function updateModel(formData: FormData) {
       model_name: String(formData.get('model_name') ?? '').trim() || null,
       provider: String(formData.get('provider') ?? '').trim() || null,
       is_active: Boolean(formData.get('is_active')),
+      modified_by_user_id: currentProfileId,
       modified_datetime_utc: new Date().toISOString()
     })
     .eq('id', id)
@@ -305,6 +316,7 @@ async function updateModel(formData: FormData) {
 async function createProvider(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return
 
@@ -312,6 +324,8 @@ async function createProvider(formData: FormData) {
     name,
     status: String(formData.get('status') ?? '').trim() || null,
     is_active: Boolean(formData.get('is_active')),
+    created_by_user_id: currentProfileId,
+    modified_by_user_id: currentProfileId,
     created_datetime_utc: new Date().toISOString(),
     modified_datetime_utc: new Date().toISOString()
   })
@@ -321,6 +335,7 @@ async function createProvider(formData: FormData) {
 async function updateProvider(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
 
@@ -330,6 +345,7 @@ async function updateProvider(formData: FormData) {
       name: String(formData.get('name') ?? '').trim() || null,
       status: String(formData.get('status') ?? '').trim() || null,
       is_active: Boolean(formData.get('is_active')),
+      modified_by_user_id: currentProfileId,
       modified_datetime_utc: new Date().toISOString()
     })
     .eq('id', id)
@@ -348,12 +364,15 @@ async function deleteProvider(formData: FormData) {
 async function createDomain(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const domain = String(formData.get('domain') ?? '').trim()
   if (!domain) return
 
   await supabase.from(TABLES.allowedSignupDomains.key).insert({
     domain,
     is_active: true,
+    created_by_user_id: currentProfileId,
+    modified_by_user_id: currentProfileId,
     created_datetime_utc: new Date().toISOString(),
     modified_datetime_utc: new Date().toISOString()
   })
@@ -363,13 +382,18 @@ async function createDomain(formData: FormData) {
 async function toggleDomain(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const id = String(formData.get('id') ?? '').trim()
   if (!id) return
   const isActive = String(formData.get('is_active') ?? 'true') === 'true'
 
   await supabase
     .from(TABLES.allowedSignupDomains.key)
-    .update({ is_active: isActive, modified_datetime_utc: new Date().toISOString() })
+    .update({
+      is_active: isActive,
+      modified_by_user_id: currentProfileId,
+      modified_datetime_utc: new Date().toISOString()
+    })
     .eq('id', id)
   revalidatePath('/')
 }
@@ -386,11 +410,14 @@ async function deleteDomain(formData: FormData) {
 async function createWhitelistedEmail(formData: FormData) {
   'use server'
   const supabase = createClient()
+  const currentProfileId = await requireCurrentProfileId(supabase)
   const emailAddress = String(formData.get('email_address') ?? '').trim()
   if (!emailAddress) return
 
   await supabase.from(TABLES.whitelistedEmailAddresses.key).insert({
     email_address: emailAddress,
+    created_by_user_id: currentProfileId,
+    modified_by_user_id: currentProfileId,
     created_datetime_utc: new Date().toISOString(),
     modified_datetime_utc: new Date().toISOString()
   })
