@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
+import { ThemeScript } from '@/components/studio/theme-script'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'The Humor Project Admin',
-  description: 'Admin panel for The Humor Project'
+  title: 'Prompt Chain Studio',
+  description: 'Prompt-chain builder and testing studio for The Humor Project'
 }
 
 export default function RootLayout({
@@ -12,8 +13,11 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className="bg-slate-100 text-slate-900">{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <ThemeScript />
+        {children}
+      </body>
     </html>
   )
 }

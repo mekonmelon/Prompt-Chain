@@ -26,7 +26,7 @@ export default function LoginPage() {
     <main className="login-page min-h-screen overflow-hidden bg-slate-100 px-6 py-10">
       <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-6xl flex-col items-center justify-center">
         <p className="mb-8 text-center text-4xl font-black tracking-tight text-slate-900 sm:text-6xl">
-          Humor Project Admin Panel
+          Prompt Chain Studio
         </p>
 
         <div className="grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
@@ -72,10 +72,13 @@ export default function LoginPage() {
             </h1>
 
             <p className="mt-4 text-lg leading-8 text-slate-600">
-              Sign in with Google to access the admin panel. This page is protected, mildly judgmental,
-              and reserved for users with{' '}
+              Sign in with Google to access Prompt Chain Studio. This page is protected, mildly judgmental, and reserved for users whose public.profiles row has either{' '}
               <code className="rounded-lg bg-slate-100 px-2 py-1 text-base text-slate-800">
-                profiles.is_superadmin = true
+                is_superadmin = true
+              </code>{' '}
+              or{' '}
+              <code className="rounded-lg bg-slate-100 px-2 py-1 text-base text-slate-800">
+                is_matrix_admin = true
               </code>
               .
             </p>
