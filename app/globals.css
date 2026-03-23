@@ -6,6 +6,10 @@
   color-scheme: light;
 }
 
+html.dark {
+  color-scheme: dark;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -16,5 +20,16 @@
     margin: 0;
     padding: 0;
     font-family: Inter, Arial, Helvetica, sans-serif;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }

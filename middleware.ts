@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { fetchCurrentProfile } from '@/lib/supabase/profile'
 
 const PUBLIC_PATHS = ['/login', '/auth/callback']
 
@@ -44,17 +45,14 @@ export async function middleware(request: NextRequest) {
   }
 
   if (user) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('is_superadmin')
-      .eq('id', user.id)
-      .single()
+    const profile = await fetchCurrentProfile(supabase, 'id, is_superadmin, is_matrix_admin')
+    const isAuthorized = Boolean(profile?.is_superadmin || profile?.is_matrix_admin)
 
-    if (!profile?.is_superadmin && pathname !== '/unauthorized') {
+    if (!isAuthorized && pathname !== '/unauthorized') {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
     }
 
-    if (profile?.is_superadmin && (pathname === '/login' || pathname === '/unauthorized')) {
+    if (isAuthorized && (pathname === '/login' || pathname === '/unauthorized')) {
       return NextResponse.redirect(new URL('/', request.url))
     }
   }

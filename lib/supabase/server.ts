@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { getEnv } from '@/lib/env'
+import { resolveCurrentProfileId } from '@/lib/supabase/profile'
 
 export function createClient() {
   const cookieStore = cookies()
@@ -20,48 +21,7 @@ export function createClient() {
   })
 }
 
-async function tryResolveProfileIdByColumn(
-  supabase: ReturnType<typeof createClient>,
-  column: string,
-  value: string
-) {
-  const { data, error } = await supabase.from('profiles').select('id').eq(column, value).maybeSingle()
-
-  if (error) {
-    const message = error.message.toLowerCase()
-    if (message.includes('column') || message.includes('schema cache')) {
-      return null
-    }
-    throw new Error(`Failed resolving profiles.id via ${column}: ${error.message}`)
-  }
-
-  return data?.id ?? null
-}
-
-export async function resolveCurrentProfileId(supabase: ReturnType<typeof createClient> = createClient()) {
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return null
-  }
-
-  const candidateMatches: Array<[string, string | undefined]> = [
-    ['id', user.id],
-    ['auth_user_id', user.id],
-    ['user_id', user.id],
-    ['email', user.email]
-  ]
-
-  for (const [column, value] of candidateMatches) {
-    if (!value) continue
-    const profileId = await tryResolveProfileIdByColumn(supabase, column, value)
-    if (profileId) return profileId
-  }
-
-  return null
-}
+export { resolveCurrentProfileId }
 
 export async function requireCurrentProfileId(supabase: ReturnType<typeof createClient> = createClient()) {
   const profileId = await resolveCurrentProfileId(supabase)
