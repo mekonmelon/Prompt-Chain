@@ -1,85 +1,55 @@
-# The Humor Project Admin Panel .
+# Prompt Chain Studio
 
-Next.js admin panel connected to Supabase with Google OAuth and superadmin-only access.
+Prompt Chain Studio is a Next.js 14 + TypeScript + Supabase admin tool for managing Humor Project prompt chains (humor flavors), their ordered steps, and a REST-driven flavor testing workflow.
 
-## 1) Configure environment
+## Environment
 
-Create `.env.local`:
+Create `.env.local` with the existing class Supabase project values:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-## 2) Configure Supabase Auth (Google)
-
-In Supabase Dashboard:
-
-1. Go to **Authentication → Providers → Google**.
-2. Enable Google provider and provide Google OAuth client credentials.
-3. Add this redirect URL:
-
-- `http://localhost:3000/auth/callback`
-- Your production URL equivalent: `https://<your-domain>/auth/callback`
-
-## 3) Run locally
+Optional runtime variable for the Assignment 5-compatible test endpoint:
 
 ```bash
-npm install
+HUMOR_PROJECT_REST_API_URL=https://your-api.example.com/path-to-caption-test-endpoint
+```
+
+## Auth and authorization
+
+- Google OAuth only.
+- Unauthenticated users are redirected to `/login`.
+- Authenticated users must have either `public.profiles.is_superadmin = true` or `public.profiles.is_matrix_admin = true`.
+- Authenticated users without one of those flags are redirected to `/unauthorized`.
+
+## Studio sections
+
+- **Overview** — humor flavor summary, counts, recently updated flavor, quick actions.
+- **Flavors** — create, edit, duplicate, and delete humor flavors in a master/detail layout.
+- **Steps** — add, edit, delete, and reorder `humor_flavor_steps` for the selected flavor.
+- **Test Runner** — send a selected flavor + image source through the Humor Project REST API.
+- **Results / Captions** — read recent captions associated with the selected flavor when flavor keys are present on caption rows.
+- **Audit Trail** — read-only inspection of `llm_prompt_chains` and `llm_model_responses`.
+
+## Schema-aware guardrails
+
+This repo intentionally avoids inventing unsupported columns:
+
+- Structured editing inputs are only shown for columns detected in currently loaded rows.
+- Flavor and step writes include `created_by_user_id` / `modified_by_user_id` for audit compatibility.
+- DB-managed datetime columns are not sent manually in the new flavor/step write flows.
+- If the REST endpoint is not configured, the test runner returns a clear debugging error instead of silently failing.
+
+## Development
+
+```bash
+npm test
 npm run dev
 ```
 
-## 4) Access rules
+## Notes
 
-- Every app route is protected.
-- Unauthenticated users are redirected to `/login`.
-- Authenticated users must have `profiles.is_superadmin = true`.
-- Non-superadmins are redirected to `/unauthorized`.
-
-## 5) Dashboard sections
-
-The home dashboard contains a statistics overview and three management sections:
-
-- **Statistics**: total users, total images, average captions per image, and top 5 upvoted captions from `caption_votes`.
-- **Users**: Read-only table of all rows from `profiles`.
-- **Images**: View all images, create image rows, edit `description`, and delete rows from `images`.
-- **Captions**: Read-only list of all rows from `captions`.
-
-## 6) SQL to grant superadmin for testing
-
-Run in Supabase SQL Editor (replace with your email):
-
-```sql
-update profiles
-set is_superadmin = true
-where id = (
-  select id
-  from auth.users
-  where email = 'you@example.com'
-);
-```
-
-## 7) Vercel deployment protection
-
-To disable Vercel Deployment Protection for testing:
-
-1. Open your Vercel project.
-2. Go to **Settings → Deployment Protection**.
-3. Disable protection for the environment you're testing (usually Preview).
-
-## 8) Styling
-
-- UI uses Tailwind utility classes (loaded via Tailwind Play CDN in `app/layout.tsx`) to render the dashboard cards, ranking list, and table layouts.
-
-
-## 9) OAuth button troubleshooting
-
-If the **Continue with Google** button does not redirect:
-
-1. Confirm `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set in your environment (local + Vercel).
-2. In Supabase Auth → URL Configuration, ensure Site URL is your app URL.
-3. Add callback URLs including:
-   - `http://localhost:3000/auth/callback`
-   - `https://<your-domain>/auth/callback`
-4. In Supabase Auth → Providers → Google, ensure Google provider is enabled and credentials are valid.
-
+- The test runner currently assumes `HUMOR_PROJECT_REST_API_URL` points directly to the Assignment 5-compatible endpoint that accepts a JSON payload containing the selected flavor and image source.
+- If your deployed backend expects a different payload or route shape, update the internal proxy route in `app/api/prompt-chain-test/route.ts`.

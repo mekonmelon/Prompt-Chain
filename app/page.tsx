@@ -1,147 +1,78 @@
-import Image from 'next/image'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { ThemeToggle } from '@/components/studio/theme-toggle'
+import { PromptChainStudioSection } from '@/components/sections/prompt-chain-studio-section'
+import {
+  asNumber,
+  asText,
+  FLAVOR_ACTIVE_KEYS,
+  FLAVOR_DESCRIPTION_KEYS,
+  FLAVOR_NAME_KEYS,
+  FLAVOR_RELATION_KEYS,
+  GenericRow,
+  getFlavorId,
+  getFlavorName,
+  getRowId,
+  getStepFlavorId,
+  getStepOrder,
+  hasStudioAccess,
+  moveItem,
+  pickFirstKey,
+  resequenceRows,
+  sortSteps,
+  STEP_ACTIVE_KEYS,
+  STEP_BODY_KEYS,
+  STEP_INPUT_TYPE_KEYS,
+  STEP_MODEL_KEYS,
+  STEP_ORDER_KEYS,
+  STEP_OUTPUT_TYPE_KEYS,
+  STEP_SYSTEM_PROMPT_KEYS,
+  STEP_TEMPERATURE_KEYS,
+  STEP_TITLE_KEYS,
+  STEP_USER_PROMPT_KEYS
+} from '@/lib/prompt-chain'
 import { createClient } from '@/lib/supabase/server'
-import { CaptionRequestsSection } from '@/components/sections/caption-requests-section'
-import { CaptionExamplesSection } from '@/components/sections/caption-examples-section'
-import { CaptionsSection } from '@/components/sections/captions-section'
-import { FlavorsSection } from '@/components/sections/flavors-section'
-import { HumorMixSection } from '@/components/sections/humor-mix-section'
-import { ImagesSection } from '@/components/sections/images-section'
-import { AllowedDomainsSection } from '@/components/sections/allowed-domains-section'
-import { LlmModelsSection } from '@/components/sections/llm-models-section'
-import { LlmProvidersSection } from '@/components/sections/llm-providers-section'
-import { PromptChainsSection } from '@/components/sections/prompt-chains-section'
-import { ResponsesSection } from '@/components/sections/responses-section'
-import { TermsSection } from '@/components/sections/terms-section'
-import { UsersSection } from '@/components/sections/users-section'
-import { WhitelistedEmailsSection } from '@/components/sections/whitelisted-emails-section'
-
-type GenericRow = Record<string, unknown>
 
 type TableResult = {
   rows: GenericRow[]
   error: string | null
-  resolvedTable: string
 }
 
-type TableConfig = {
-  key: string
-  label: string
-  sortColumn?: 'created_datetime_utc'
-}
+type ViewId = 'overview' | 'flavors' | 'steps' | 'test-runner' | 'results' | 'audit'
 
 type NavItem = {
-  id: string
+  id: ViewId
   label: string
   description: string
 }
 
-type NavGroup = {
-  title: string
-  items: NavItem[]
-}
-
-const TABLES: Record<string, TableConfig> = {
-  profiles: { key: 'profiles', label: 'profiles', sortColumn: 'created_datetime_utc' },
-  images: { key: 'images', label: 'images', sortColumn: 'created_datetime_utc' },
-  humorFlavors: { key: 'humor_flavors', label: 'humor_flavors' },
-  humorFlavorSteps: { key: 'humor_flavor_steps', label: 'humor_flavor_steps' },
-  humorFlavorMix: { key: 'humor_flavor_mix', label: 'humor_flavor_mix', sortColumn: 'created_datetime_utc' },
-  terms: { key: 'terms', label: 'terms', sortColumn: 'created_datetime_utc' },
-  captions: { key: 'captions', label: 'captions', sortColumn: 'created_datetime_utc' },
-  captionRequests: { key: 'caption_requests', label: 'caption_requests', sortColumn: 'created_datetime_utc' },
-  captionExamples: { key: 'caption_examples', label: 'caption_examples', sortColumn: 'created_datetime_utc' },
-  llmModels: { key: 'llm_models', label: 'llm_models', sortColumn: 'created_datetime_utc' },
-  llmProviders: { key: 'llm_providers', label: 'llm_providers', sortColumn: 'created_datetime_utc' },
-  llmPromptChains: { key: 'llm_prompt_chains', label: 'llm_prompt_chains', sortColumn: 'created_datetime_utc' },
-  llmResponses: { key: 'llm_model_responses', label: 'llm_model_responses' },
-  allowedSignupDomains: { key: 'allowed_signup_domains', label: 'allowed_signup_domains', sortColumn: 'created_datetime_utc' },
-  whitelistedEmailAddresses: { key: 'whitelist_email_addresses', label: 'whitelist_email_addresses', sortColumn: 'created_datetime_utc' }
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  { title: 'Overview', items: [{ id: 'dashboard', label: 'Dashboard', description: 'Studio activity and health.' }] },
-  {
-    title: 'Content',
-    items: [
-      { id: 'images', label: 'Images', description: 'Media inventory and upload operations.' },
-      { id: 'captions', label: 'Captions', description: 'Caption content and voting context.' },
-      { id: 'caption-requests', label: 'Caption Requests', description: 'Generation queue and request flow.' },
-      { id: 'caption-examples', label: 'Caption Examples', description: 'Example library for quality tuning.' },
-      { id: 'terms', label: 'Terms', description: 'Moderation and exclusion rules.' }
-    ]
-  },
-  {
-    title: 'Humor Pipeline',
-    items: [
-      { id: 'flavors', label: 'Flavors', description: 'Humor flavor catalog + steps.' },
-      { id: 'flavor-steps', label: 'Flavor Steps', description: 'Step timeline per selected flavor.' },
-      { id: 'humor-mix', label: 'Humor Mix', description: 'Default flavor blend configuration.' }
-    ]
-  },
-  {
-    title: 'AI / LLM',
-    items: [
-      { id: 'models', label: 'Models', description: 'Model registry and settings.' },
-      { id: 'providers', label: 'Providers', description: 'Provider configuration and usage.' },
-      { id: 'prompt-chains', label: 'Prompt Chains', description: 'Pipeline chain definitions.' },
-      { id: 'responses', label: 'Responses', description: 'Model response logs.' }
-    ]
-  },
-  {
-    title: 'Access',
-    items: [
-      { id: 'users', label: 'Users', description: 'Profiles and superadmin status.' },
-      { id: 'allowed-domains', label: 'Allowed Domains', description: 'Signup allowlist by domain.' },
-      { id: 'whitelisted-emails', label: 'Whitelisted Emails', description: 'Email-level access allowlist.' }
-    ]
-  }
+const NAV_ITEMS: NavItem[] = [
+  { id: 'overview', label: 'Overview', description: 'Prompt-chain summary, studio stats, and quick actions.' },
+  { id: 'flavors', label: 'Flavors', description: 'Create, edit, duplicate, and remove humor flavors.' },
+  { id: 'steps', label: 'Steps', description: 'Maintain ordered humor_flavor_steps for the selected flavor.' },
+  { id: 'test-runner', label: 'Test Runner', description: 'Send a flavor + image source to the Humor Project REST API.' },
+  { id: 'results', label: 'Results / Captions', description: 'Inspect captions produced for the selected flavor.' },
+  { id: 'audit', label: 'Audit Trail', description: 'Read-only llm_prompt_chains and llm_model_responses debugging view.' }
 ]
 
-function asText(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return JSON.stringify(value)
+const TABLES = {
+  profiles: 'profiles',
+  flavors: 'humor_flavors',
+  steps: 'humor_flavor_steps',
+  mixes: 'humor_flavor_mix',
+  captions: 'captions',
+  images: 'images',
+  promptChains: 'llm_prompt_chains',
+  responses: 'llm_model_responses'
+} as const
+
+function isView(value: string): value is ViewId {
+  return NAV_ITEMS.some((item) => item.id === value)
 }
 
-function getRowId(row: GenericRow) {
-  return asText(row.id)
-}
-
-function getCaptionId(row: GenericRow) {
-  return asText(row.caption_id || row.captionId)
-}
-
-function getVoteValue(row: GenericRow) {
-  const raw = row.vote_value ?? row.value ?? 0
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function getCaptionText(row: GenericRow) {
-  return asText(row.caption_text || row.content || row.text)
-}
-
-function getChartDay(date: Date) {
-  return date.toLocaleDateString('en-US', { weekday: 'short' })
-}
-
-function isViewValid(view: string) {
-  return NAV_GROUPS.some((group) => group.items.some((item) => item.id === view))
-}
-
-function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <p className="text-sm text-slate-500">{subtitle}</p>
-      </div>
-      {children}
-    </section>
-  )
+function buildOptionalString(value: FormDataEntryValue | null) {
+  const text = String(value ?? '').trim()
+  return text || null
 }
 
 async function signOut() {
@@ -151,665 +82,379 @@ async function signOut() {
   redirect('/login')
 }
 
-async function createImageRow(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const {
-    data: { user }
-  } = await supabase.auth.getUser()
-
-  const url = String(formData.get('url') ?? '').trim()
-  const description = String(formData.get('description') ?? '').trim()
-  const profileId = String(formData.get('profile_id') ?? '').trim() || user?.id
-  if (!url) return
-
-  const payload: GenericRow = {
-    url,
-    image_description: description,
-    created_datetime_utc: new Date().toISOString(),
-    modified_datetime_utc: new Date().toISOString()
-  }
-
-  if (profileId) payload.profile_id = profileId
-
-  await supabase.from(TABLES.images.key).insert(payload)
-  revalidatePath('/')
-}
-
-async function updateImageRow(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  const payload: GenericRow = {
-    modified_datetime_utc: new Date().toISOString()
-  }
-
-  const url = String(formData.get('url') ?? '').trim()
-  const imageDescription = String(formData.get('image_description') ?? '').trim()
-  const profileId = String(formData.get('profile_id') ?? '').trim()
-
-  if (url) payload.url = url
-  payload.image_description = imageDescription
-  if (profileId) payload.profile_id = profileId
-
-  await supabase.from(TABLES.images.key).update(payload).eq('id', id)
-  revalidatePath('/')
-}
-
-async function deleteImageRow(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  await supabase.from(TABLES.images.key).delete().eq('id', id)
-  revalidatePath('/')
-}
-
-async function updateHumorMixRow(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  const payloadRaw = String(formData.get('payload') ?? '{}')
-  let payload: GenericRow = {}
-  try {
-    const parsed = JSON.parse(payloadRaw)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      payload = parsed
-    }
-  } catch {
-    payload = {}
-  }
-
-  const flavorId = String(formData.get('flavor_id') ?? '').trim()
-  const captionCount = String(formData.get('caption_count') ?? '').trim()
-
-  if (flavorId) {
-    payload.flavor_id = flavorId
-  }
-  if (captionCount) {
-    const numericCount = Number(captionCount)
-    payload.caption_count = Number.isFinite(numericCount) ? numericCount : captionCount
-  }
-  payload.modified_datetime_utc = new Date().toISOString()
-
-  await supabase.from(TABLES.humorFlavorMix.key).update(payload).eq('id', id)
-  revalidatePath('/')
-}
-
-async function createTerm(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const term = String(formData.get('term') ?? '').trim()
-  if (!term) return
-
-  await supabase.from(TABLES.terms.key).insert({
-    term,
-    type: String(formData.get('type') ?? '').trim() || null,
-    is_active: Boolean(formData.get('is_active')),
-    created_datetime_utc: new Date().toISOString(),
-    modified_datetime_utc: new Date().toISOString()
-  })
-  revalidatePath('/')
-}
-
-async function updateTerm(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  await supabase
-    .from(TABLES.terms.key)
-    .update({
-      term: String(formData.get('term') ?? '').trim(),
-      type: String(formData.get('type') ?? '').trim() || null,
-      is_active: Boolean(formData.get('is_active')),
-      modified_datetime_utc: new Date().toISOString()
-    })
-    .eq('id', id)
-  revalidatePath('/')
-}
-
-async function deleteTerm(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-  await supabase.from(TABLES.terms.key).delete().eq('id', id)
-  revalidatePath('/')
-}
-
-async function updateModel(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  await supabase
-    .from(TABLES.llmModels.key)
-    .update({
-      model_name: String(formData.get('model_name') ?? '').trim() || null,
-      provider: String(formData.get('provider') ?? '').trim() || null,
-      is_active: Boolean(formData.get('is_active')),
-      modified_datetime_utc: new Date().toISOString()
-    })
-    .eq('id', id)
-  revalidatePath('/')
-}
-
-async function createProvider(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const name = String(formData.get('name') ?? '').trim()
-  if (!name) return
-
-  await supabase.from(TABLES.llmProviders.key).insert({
-    name,
-    status: String(formData.get('status') ?? '').trim() || null,
-    is_active: Boolean(formData.get('is_active')),
-    created_datetime_utc: new Date().toISOString(),
-    modified_datetime_utc: new Date().toISOString()
-  })
-  revalidatePath('/')
-}
-
-async function updateProvider(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-
-  await supabase
-    .from(TABLES.llmProviders.key)
-    .update({
-      name: String(formData.get('name') ?? '').trim() || null,
-      status: String(formData.get('status') ?? '').trim() || null,
-      is_active: Boolean(formData.get('is_active')),
-      modified_datetime_utc: new Date().toISOString()
-    })
-    .eq('id', id)
-  revalidatePath('/')
-}
-
-async function deleteProvider(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-  await supabase.from(TABLES.llmProviders.key).delete().eq('id', id)
-  revalidatePath('/')
-}
-
-async function createDomain(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const domain = String(formData.get('domain') ?? '').trim()
-  if (!domain) return
-
-  await supabase.from(TABLES.allowedSignupDomains.key).insert({
-    domain,
-    is_active: true,
-    created_datetime_utc: new Date().toISOString(),
-    modified_datetime_utc: new Date().toISOString()
-  })
-  revalidatePath('/')
-}
-
-async function toggleDomain(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-  const isActive = String(formData.get('is_active') ?? 'true') === 'true'
-
-  await supabase
-    .from(TABLES.allowedSignupDomains.key)
-    .update({ is_active: isActive, modified_datetime_utc: new Date().toISOString() })
-    .eq('id', id)
-  revalidatePath('/')
-}
-
-async function deleteDomain(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-  await supabase.from(TABLES.allowedSignupDomains.key).delete().eq('id', id)
-  revalidatePath('/')
-}
-
-async function createWhitelistedEmail(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const emailAddress = String(formData.get('email_address') ?? '').trim()
-  if (!emailAddress) return
-
-  await supabase.from(TABLES.whitelistedEmailAddresses.key).insert({
-    email_address: emailAddress,
-    created_datetime_utc: new Date().toISOString(),
-    modified_datetime_utc: new Date().toISOString()
-  })
-  revalidatePath('/')
-}
-
-async function deleteWhitelistedEmail(formData: FormData) {
-  'use server'
-  const supabase = createClient()
-  const id = String(formData.get('id') ?? '').trim()
-  if (!id) return
-  await supabase.from(TABLES.whitelistedEmailAddresses.key).delete().eq('id', id)
-  revalidatePath('/')
-}
-
 export default async function Home({
   searchParams
 }: {
-  searchParams?: { [key: string]: string | string[] | undefined }
+  searchParams?: Record<string, string | string[] | undefined>
 }) {
   const supabase = createClient()
   const {
     data: { user }
   } = await supabase.auth.getUser()
 
-  const selectedViewParam = asText(Array.isArray(searchParams?.view) ? searchParams?.view[0] : searchParams?.view)
-  const selectedView = isViewValid(selectedViewParam) ? selectedViewParam : 'dashboard'
+  if (!user) {
+    redirect('/login')
+  }
 
-  const fetchTable = async (config: TableConfig): Promise<TableResult> => {
+  const { data: profile } = await supabase
+    .from(TABLES.profiles)
+    .select('id, email, is_superadmin, is_matrix_admin')
+    .eq('id', user.id)
+    .single()
+
+  if (!hasStudioAccess(profile as GenericRow | null | undefined)) {
+    redirect('/unauthorized')
+  }
+
+  const selectedViewRaw = asText(Array.isArray(searchParams?.view) ? searchParams?.view[0] : searchParams?.view)
+  const selectedView: ViewId = isView(selectedViewRaw) ? selectedViewRaw : 'overview'
+
+  const fetchTable = async (table: string, options?: { orderBy?: string; ascending?: boolean; limit?: number }): Promise<TableResult> => {
     try {
-      let query = supabase.from(config.key).select('*').limit(50)
-      if (config.sortColumn) {
-        query = query.order(config.sortColumn, { ascending: false })
+      let query = supabase.from(table).select('*').limit(options?.limit ?? 200)
+      if (options?.orderBy) {
+        query = query.order(options.orderBy, { ascending: options.ascending ?? false })
       }
-
       const { data, error } = await query
-      if (error) return { rows: [], error: error.message, resolvedTable: config.key }
-      return { rows: (data ?? []) as GenericRow[], error: null, resolvedTable: config.key }
+      if (error) return { rows: [], error: `${table}: ${error.message}` }
+      return { rows: (data ?? []) as GenericRow[], error: null }
     } catch (error) {
-      return {
-        rows: [],
-        error: error instanceof Error ? error.message : `Unknown fetch error for ${config.key}`,
-        resolvedTable: config.key
-      }
+      return { rows: [], error: `${table}: ${error instanceof Error ? error.message : 'Unknown fetch error'}` }
     }
   }
 
-  const settled = await Promise.allSettled([
-    fetchTable(TABLES.profiles),
-    fetchTable(TABLES.images),
-    fetchTable(TABLES.humorFlavors),
-    fetchTable(TABLES.humorFlavorSteps),
-    fetchTable(TABLES.humorFlavorMix),
-    fetchTable(TABLES.terms),
-    fetchTable(TABLES.captions),
-    fetchTable(TABLES.captionRequests),
-    fetchTable(TABLES.captionExamples),
-    fetchTable(TABLES.llmModels),
-    fetchTable(TABLES.llmProviders),
-    fetchTable(TABLES.llmPromptChains),
-    fetchTable(TABLES.llmResponses),
-    fetchTable(TABLES.allowedSignupDomains),
-    fetchTable(TABLES.whitelistedEmailAddresses)
+  const [flavorsResult, stepsResult, mixesResult, captionsResult, imagesResult, promptChainsResult, responsesResult] = await Promise.all([
+    fetchTable(TABLES.flavors, { orderBy: 'modified_datetime_utc' }),
+    fetchTable(TABLES.steps, { orderBy: 'modified_datetime_utc' }),
+    fetchTable(TABLES.mixes, { orderBy: 'modified_datetime_utc' }),
+    fetchTable(TABLES.captions, { orderBy: 'created_datetime_utc' }),
+    fetchTable(TABLES.images, { orderBy: 'created_datetime_utc' }),
+    fetchTable(TABLES.promptChains, { orderBy: 'created_datetime_utc' }),
+    fetchTable(TABLES.responses, { orderBy: 'created_datetime_utc' })
   ])
-
-  const toResult = (item: PromiseSettledResult<TableResult>, key: string): TableResult =>
-    item.status === 'fulfilled'
-      ? item.value
-      : {
-          rows: [],
-          error: item.reason instanceof Error ? item.reason.message : `Failed to fetch ${key}`,
-          resolvedTable: key
-        }
-
-  const [profiles, images, humorFlavors, humorFlavorSteps, humorFlavorMix, terms, captions, captionRequests, captionExamples, llmModels, llmProviders, llmPromptChains, llmResponses, allowedSignupDomains, whitelistedEmailAddresses] = [
-    toResult(settled[0], TABLES.profiles.key),
-    toResult(settled[1], TABLES.images.key),
-    toResult(settled[2], TABLES.humorFlavors.key),
-    toResult(settled[3], TABLES.humorFlavorSteps.key),
-    toResult(settled[4], TABLES.humorFlavorMix.key),
-    toResult(settled[5], TABLES.terms.key),
-    toResult(settled[6], TABLES.captions.key),
-    toResult(settled[7], TABLES.captionRequests.key),
-    toResult(settled[8], TABLES.captionExamples.key),
-    toResult(settled[9], TABLES.llmModels.key),
-    toResult(settled[10], TABLES.llmProviders.key),
-    toResult(settled[11], TABLES.llmPromptChains.key),
-    toResult(settled[12], TABLES.llmResponses.key),
-    toResult(settled[13], TABLES.allowedSignupDomains.key),
-    toResult(settled[14], TABLES.whitelistedEmailAddresses.key)
-  ]
 
   const allErrors = [
-    [profiles.resolvedTable, profiles.error],
-    [images.resolvedTable, images.error],
-    [humorFlavors.resolvedTable, humorFlavors.error],
-    [humorFlavorSteps.resolvedTable, humorFlavorSteps.error],
-    [humorFlavorMix.resolvedTable, humorFlavorMix.error],
-    [terms.resolvedTable, terms.error],
-    [captions.resolvedTable, captions.error],
-    [captionRequests.resolvedTable, captionRequests.error],
-    [captionExamples.resolvedTable, captionExamples.error],
-    [llmModels.resolvedTable, llmModels.error],
-    [llmProviders.resolvedTable, llmProviders.error],
-    [llmPromptChains.resolvedTable, llmPromptChains.error],
-    [llmResponses.resolvedTable, llmResponses.error],
-    [allowedSignupDomains.resolvedTable, allowedSignupDomains.error],
-    [whitelistedEmailAddresses.resolvedTable, whitelistedEmailAddresses.error]
-  ].filter(([, error]) => Boolean(error))
+    flavorsResult.error,
+    stepsResult.error,
+    mixesResult.error,
+    captionsResult.error,
+    imagesResult.error,
+    promptChainsResult.error,
+    responsesResult.error
+  ].filter(Boolean)
 
-  const [
-    { count: totalUsersCount },
-    { count: totalImagesCount },
-    { count: totalCaptionsCount },
-    { count: totalRequestsCount },
-    { count: totalFlavorCount },
-    { count: totalModelsCount },
-    { count: totalProvidersCount },
-    { count: totalDomainsCount },
-    { count: totalWhitelistCount }
-  ] = await Promise.all([
-    supabase.from(TABLES.profiles.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.images.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.captions.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.captionRequests.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.humorFlavors.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.llmModels.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.llmProviders.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.allowedSignupDomains.key).select('*', { count: 'exact', head: true }),
-    supabase.from(TABLES.whitelistedEmailAddresses.key).select('*', { count: 'exact', head: true })
-  ])
+  const flavors = flavorsResult.rows
+  const steps = stepsResult.rows
+  const mixes = mixesResult.rows
+  const captions = captionsResult.rows
+  const images = imagesResult.rows
+  const promptChains = promptChainsResult.rows
+  const responses = responsesResult.rows
 
-  const totalUsers = totalUsersCount ?? 0
-  const totalImages = totalImagesCount ?? 0
-  const totalCaptions = totalCaptionsCount ?? 0
-  const totalRequests = totalRequestsCount ?? 0
-  const totalFlavors = totalFlavorCount ?? 0
-  const totalModels = totalModelsCount ?? 0
-  const totalProviders = totalProvidersCount ?? 0
-  const totalDomains = totalDomainsCount ?? 0
-  const totalWhitelistEmails = totalWhitelistCount ?? 0
-  const avgCaptionsPerImage = totalImages ? (totalCaptions / totalImages).toFixed(2) : '0.00'
+  const flavorNameKey = pickFirstKey(flavors, FLAVOR_NAME_KEYS) ?? 'name'
+  const flavorDescriptionKey = pickFirstKey(flavors, FLAVOR_DESCRIPTION_KEYS)
+  const flavorActiveKey = pickFirstKey(flavors, FLAVOR_ACTIVE_KEYS)
+  const stepRelationKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'flavor_id'
+  const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'step_order'
+  const stepTitleKey = pickFirstKey(steps, STEP_TITLE_KEYS) ?? 'step_title'
+  const stepBodyKey = pickFirstKey(steps, STEP_BODY_KEYS)
+  const stepSystemPromptKey = pickFirstKey(steps, STEP_SYSTEM_PROMPT_KEYS)
+  const stepUserPromptKey = pickFirstKey(steps, STEP_USER_PROMPT_KEYS)
+  const stepInputTypeKey = pickFirstKey(steps, STEP_INPUT_TYPE_KEYS)
+  const stepOutputTypeKey = pickFirstKey(steps, STEP_OUTPUT_TYPE_KEYS)
+  const stepTemperatureKey = pickFirstKey(steps, STEP_TEMPERATURE_KEYS)
+  const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS)
+  const stepActiveKey = pickFirstKey(steps, STEP_ACTIVE_KEYS)
 
-  const { data: topCaptionCandidates } = await supabase.from(TABLES.captions.key).select('id, content, image_id, created_datetime_utc').order('created_datetime_utc', { ascending: false }).limit(200)
-  const topCaptionRows = (topCaptionCandidates ?? []) as GenericRow[]
-  const candidateCaptionIds = topCaptionRows.map((row) => getRowId(row)).filter(Boolean)
-  const { data: voteRows } = candidateCaptionIds.length ? await supabase.from('caption_votes').select('caption_id, vote_value').in('caption_id', candidateCaptionIds) : { data: [] as GenericRow[] }
+  async function createFlavor(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const name = String(formData.get('name') ?? '').trim()
+    if (!name || !profile?.id) return
 
-  const voteRowsSafe = (voteRows ?? []) as GenericRow[]
-  const votesByCaption = voteRowsSafe.reduce<Record<string, number>>((acc, vote) => {
-    const captionId = getCaptionId(vote)
-    if (!captionId) return acc
-    acc[captionId] = (acc[captionId] ?? 0) + getVoteValue(vote)
-    return acc
-  }, {})
+    const payload: GenericRow = {
+      [flavorNameKey]: name,
+      created_by_user_id: profile.id,
+      modified_by_user_id: profile.id
+    }
 
-  const topCaptions = topCaptionRows
-    .map((caption) => {
-      const id = getRowId(caption)
-      return { id, imageId: asText(caption.image_id), text: getCaptionText(caption), votes: id ? votesByCaption[id] ?? 0 : 0 }
-    })
-    .sort((a, b) => b.votes - a.votes)
-    .slice(0, 5)
+    if (flavorDescriptionKey) {
+      payload[flavorDescriptionKey] = buildOptionalString(formData.get('description'))
+    }
+    if (flavorActiveKey) {
+      payload[flavorActiveKey] = Boolean(formData.get('is_active'))
+    }
 
-  const imagePreviewById = new Map<string, string>()
-  images.rows.forEach((row) => {
-    const id = getRowId(row)
-    const preview = asText(row.url || row.image_url || row.image_src || row.public_url)
-    if (id && preview) imagePreviewById.set(id, preview)
-  })
+    await supabase.from(TABLES.flavors).insert(payload)
+    revalidatePath('/')
+  }
 
-  const today = new Date()
-  const dateSeries = [...Array(7)].map((_, idx) => {
-    const date = new Date(today)
-    date.setDate(today.getDate() - (6 - idx))
-    const key = date.toISOString().slice(0, 10)
-    return { key, label: getChartDay(date), value: 0 }
-  })
-  const dateIndex = new Map(dateSeries.map((day, index) => [day.key, index]))
-  topCaptionRows.forEach((row) => {
-    const raw = asText(row.created_datetime_utc)
-    const key = raw.slice(0, 10)
-    const idx = dateIndex.get(key)
-    if (idx !== undefined) dateSeries[idx].value += 1
-  })
-  const maxActivity = Math.max(...dateSeries.map((day) => day.value), 1)
+  async function updateFlavor(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    const name = String(formData.get('name') ?? '').trim()
+    if (!id || !name || !profile?.id) return
 
-  const upvotes = voteRowsSafe.filter((row) => getVoteValue(row) > 0).length
-  const downvotes = voteRowsSafe.filter((row) => getVoteValue(row) < 0).length
-  const netVotes = voteRowsSafe.reduce((sum, row) => sum + getVoteValue(row), 0)
+    const payload: GenericRow = {
+      [flavorNameKey]: name,
+      modified_by_user_id: profile.id
+    }
 
-  const selectedItem = NAV_GROUPS.flatMap((group) => group.items).find((item) => item.id === selectedView)
+    if (flavorDescriptionKey) {
+      payload[flavorDescriptionKey] = buildOptionalString(formData.get('description'))
+    }
+    if (flavorActiveKey) {
+      payload[flavorActiveKey] = Boolean(formData.get('is_active'))
+    }
+
+    await supabase.from(TABLES.flavors).update(payload).eq('id', id)
+    revalidatePath('/')
+  }
+
+  async function deleteFlavor(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    if (!id) return
+
+    await supabase.from(TABLES.flavors).delete().eq('id', id)
+    revalidatePath('/')
+  }
+
+  async function duplicateFlavor(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    if (!id || !profile?.id) return
+
+    const sourceFlavor = flavors.find((row) => getFlavorId(row) === id)
+    if (!sourceFlavor) return
+
+    const flavorPayload: GenericRow = {
+      [flavorNameKey]: `${getFlavorName(sourceFlavor)} Copy`,
+      created_by_user_id: profile.id,
+      modified_by_user_id: profile.id
+    }
+
+    if (flavorDescriptionKey && flavorDescriptionKey in sourceFlavor) {
+      flavorPayload[flavorDescriptionKey] = sourceFlavor[flavorDescriptionKey]
+    }
+    if (flavorActiveKey && flavorActiveKey in sourceFlavor) {
+      flavorPayload[flavorActiveKey] = sourceFlavor[flavorActiveKey]
+    }
+
+    const { data: insertedFlavor } = await supabase.from(TABLES.flavors).insert(flavorPayload).select('id').single()
+    if (!insertedFlavor?.id) {
+      revalidatePath('/')
+      return
+    }
+
+    const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
+    if (relatedSteps.length) {
+      const stepPayloads = relatedSteps.map((step, index) => {
+        const payload: GenericRow = {
+          [stepRelationKey]: insertedFlavor.id,
+          [stepOrderKey]: index + 1,
+          created_by_user_id: profile.id,
+          modified_by_user_id: profile.id
+        }
+
+        ;[
+          stepTitleKey,
+          stepBodyKey,
+          stepSystemPromptKey,
+          stepUserPromptKey,
+          stepInputTypeKey,
+          stepOutputTypeKey,
+          stepTemperatureKey,
+          stepModelKey,
+          stepActiveKey
+        ].forEach((key) => {
+          if (key && key in step) payload[key] = step[key]
+        })
+
+        return payload
+      })
+
+      await supabase.from(TABLES.steps).insert(stepPayloads)
+    }
+
+    revalidatePath('/')
+  }
+
+  async function createStep(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const flavorId = String(formData.get('flavor_id') ?? '').trim()
+    if (!flavorId || !profile?.id) return
+
+    const currentSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
+    const nextOrder = (currentSteps.at(-1) ? getStepOrder(currentSteps.at(-1) as GenericRow) : 0) + 1
+
+    const payload: GenericRow = {
+      [stepRelationKey]: flavorId,
+      [stepOrderKey]: nextOrder,
+      created_by_user_id: profile.id,
+      modified_by_user_id: profile.id
+    }
+
+    payload[stepTitleKey] = buildOptionalString(formData.get('step_title'))
+    if (stepBodyKey) payload[stepBodyKey] = buildOptionalString(formData.get('step_body'))
+    if (stepSystemPromptKey) payload[stepSystemPromptKey] = buildOptionalString(formData.get('system_prompt'))
+    if (stepUserPromptKey) payload[stepUserPromptKey] = buildOptionalString(formData.get('user_prompt'))
+    if (stepInputTypeKey) payload[stepInputTypeKey] = buildOptionalString(formData.get('input_type'))
+    if (stepOutputTypeKey) payload[stepOutputTypeKey] = buildOptionalString(formData.get('output_type'))
+    if (stepTemperatureKey) payload[stepTemperatureKey] = asNumber(formData.get('temperature'))
+    if (stepModelKey) payload[stepModelKey] = buildOptionalString(formData.get('model_link'))
+    if (stepActiveKey) payload[stepActiveKey] = Boolean(formData.get('is_active'))
+
+    await supabase.from(TABLES.steps).insert(payload)
+    revalidatePath('/')
+  }
+
+  async function updateStep(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    if (!id || !profile?.id) return
+
+    const payload: GenericRow = {
+      modified_by_user_id: profile.id,
+      [stepTitleKey]: buildOptionalString(formData.get('step_title'))
+    }
+
+    const order = asNumber(formData.get('step_order'))
+    if (order !== null) payload[stepOrderKey] = order
+    if (stepBodyKey) payload[stepBodyKey] = buildOptionalString(formData.get('step_body'))
+    if (stepSystemPromptKey) payload[stepSystemPromptKey] = buildOptionalString(formData.get('system_prompt'))
+    if (stepUserPromptKey) payload[stepUserPromptKey] = buildOptionalString(formData.get('user_prompt'))
+    if (stepInputTypeKey) payload[stepInputTypeKey] = buildOptionalString(formData.get('input_type'))
+    if (stepOutputTypeKey) payload[stepOutputTypeKey] = buildOptionalString(formData.get('output_type'))
+    if (stepTemperatureKey) payload[stepTemperatureKey] = asNumber(formData.get('temperature'))
+    if (stepModelKey) payload[stepModelKey] = buildOptionalString(formData.get('model_link'))
+    if (stepActiveKey) payload[stepActiveKey] = Boolean(formData.get('is_active'))
+
+    await supabase.from(TABLES.steps).update(payload).eq('id', id)
+    revalidatePath('/')
+  }
+
+  async function deleteStep(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    if (!id) return
+
+    await supabase.from(TABLES.steps).delete().eq('id', id)
+    revalidatePath('/')
+  }
+
+  async function reorderStep(formData: FormData) {
+    'use server'
+    const supabase = createClient()
+    const id = String(formData.get('id') ?? '').trim()
+    const direction = String(formData.get('direction') ?? '').trim()
+    if (!id || !profile?.id || !['up', 'down'].includes(direction)) return
+
+    const target = steps.find((row) => getRowId(row) === id)
+    if (!target) return
+
+    const flavorId = getStepFlavorId(target)
+    const siblings = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
+    const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
+    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+    const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), stepOrderKey)
+
+    await Promise.all(
+      reordered.map((row) =>
+        supabase
+          .from(TABLES.steps)
+          .update({ [stepOrderKey]: row[stepOrderKey], modified_by_user_id: profile.id })
+          .eq('id', getRowId(row))
+      )
+    )
+
+    revalidatePath('/')
+  }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 lg:grid-cols-[280px_1fr]">
-        <aside className="border-b border-slate-800 bg-slate-900/90 px-4 py-6 lg:border-b-0 lg:border-r">
-          <div className="mb-6 rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/20 to-purple-500/10 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200">Studio Console</p>
-            <h1 className="mt-2 text-xl font-bold text-white">The Humor Project</h1>
-            <p className="mt-1 text-xs text-slate-300">Creative operations and moderation workspace.</p>
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      <div className="mx-auto grid min-h-screen max-w-[1700px] grid-cols-1 xl:grid-cols-[290px_1fr]">
+        <aside className="border-b border-[var(--shell-border)] bg-[var(--shell)] px-4 py-6 xl:border-b-0 xl:border-r">
+          <div className="rounded-3xl border border-indigo-500/25 bg-[linear-gradient(135deg,rgba(79,70,229,0.18),rgba(17,24,39,0.12))] p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-300">Assignment 8</p>
+            <h1 className="mt-2 text-2xl font-bold text-white">Prompt Chain Studio</h1>
+            <p className="mt-2 text-sm text-slate-300">A matrix-like builder for humor flavors, ordered steps, flavor testing, and caption review.</p>
           </div>
 
-          <nav className="space-y-4">
-            {NAV_GROUPS.map((group) => (
-              <details key={group.title} open>
-                <summary className="mb-2 cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-slate-400">{group.title}</summary>
-                <div className="space-y-1">
-                  {group.items.map((item) => {
-                    const active = selectedView === item.id
-                    return (
-                      <a
-                        key={item.id}
-                        className={`block rounded-xl px-3 py-2 text-sm transition ${
-                          active ? 'bg-indigo-500/20 text-indigo-100 ring-1 ring-indigo-400/40' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                        }`}
-                        href={`/?view=${item.id}`}
-                      >
-                        <div className="font-medium">{item.label}</div>
-                        <div className="text-xs text-slate-400">{item.description}</div>
-                      </a>
-                    )
-                  })}
-                </div>
-              </details>
-            ))}
+          <nav className="mt-6 space-y-2">
+            {NAV_ITEMS.map((item) => {
+              const active = item.id === selectedView
+              return (
+                <a
+                  key={item.id}
+                  href={`/?view=${item.id}`}
+                  className={`block rounded-2xl border px-4 py-3 transition ${
+                    active
+                      ? 'border-indigo-400/40 bg-indigo-500/15 text-white shadow-sm'
+                      : 'border-transparent text-slate-300 hover:border-[var(--shell-border)] hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <p className="text-sm font-semibold">{item.label}</p>
+                  <p className="mt-1 text-xs text-slate-400">{item.description}</p>
+                </a>
+              )
+            })}
           </nav>
         </aside>
 
-        <div className="bg-slate-100 text-slate-900">
-          <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-            <div className="mx-auto flex w-[95%] max-w-6xl items-center justify-between py-4">
+        <div>
+          <header className="sticky top-0 z-20 border-b border-[var(--panel-border)] bg-[color:var(--background)/0.92] backdrop-blur">
+            <div className="mx-auto flex w-[95%] max-w-7xl flex-col gap-4 py-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Studio Console / {selectedItem?.label ?? 'Dashboard'}</p>
-                <h2 className="text-2xl font-bold text-slate-900">Welcome back, {user?.email ?? 'Admin'}.</h2>
+                <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted-foreground)]">Prompt Chain Studio / {NAV_ITEMS.find((item) => item.id === selectedView)?.label}</p>
+                <h2 className="mt-2 text-3xl font-bold">Welcome back, {asText(profile?.email || user.email) || 'Studio Admin'}.</h2>
+                <p className="mt-1 text-sm text-[var(--muted-foreground)]">Access granted because your profile is marked as superadmin or matrix admin.</p>
               </div>
-              <form action={signOut}>
-                <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700" type="submit">
-                  Sign Out
-                </button>
-              </form>
+              <div className="flex flex-wrap items-center gap-3">
+                <ThemeToggle />
+                <form action={signOut}>
+                  <button className="rounded-full bg-[var(--foreground)] px-5 py-2 text-sm font-semibold text-[var(--background)]" type="submit">Sign out</button>
+                </form>
+              </div>
             </div>
           </header>
 
-          <main className="mx-auto grid w-[95%] max-w-6xl gap-6 py-8">
-            {allErrors.length > 0 ? (
-              <section className="rounded-xl border border-rose-300 bg-rose-50 p-4 text-rose-800">
-                <h2 className="text-lg font-semibold">Table fetch errors</h2>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                  {allErrors.map(([table, error]) => (
-                    <li key={String(table)}>
-                      {table}: {error}
-                    </li>
+          <main className="mx-auto grid w-[95%] max-w-7xl gap-6 py-8">
+            {allErrors.length ? (
+              <section className="rounded-3xl border border-rose-400/30 bg-rose-500/10 p-5 text-rose-200">
+                <h3 className="text-lg font-semibold">Fetch warnings</h3>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
+                  {allErrors.map((error) => (
+                    <li key={error}>{error}</li>
                   ))}
                 </ul>
               </section>
             ) : null}
 
-            {selectedView === 'dashboard' ? (
-              <>
-                <SectionCard title="Humor Studio Pulse" subtitle="A live editorial view of your caption pipeline, creative throughput, and moderation readiness.">
-                  <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-                    <div className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-violet-500 p-5 text-white">
-                      <p className="text-xs uppercase tracking-[0.2em] text-indigo-100">Overview Brief</p>
-                      <h3 className="mt-2 text-2xl font-bold">Creative Ops Studio</h3>
-                      <p className="mt-2 max-w-xl text-sm text-indigo-100">Track caption quality, generation throughput, and governance controls from one unified workspace for the Humor Project team.</p>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                      <div className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pipeline Coverage</p>
-                        <p className="mt-2 text-2xl font-bold">{totalFlavors}</p>
-                        <p className="text-xs text-slate-500">Flavors configured</p>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Access Controls</p>
-                        <p className="mt-2 text-2xl font-bold">{totalDomains + totalWhitelistEmails}</p>
-                        <p className="text-xs text-slate-500">Domain + email rules</p>
-                      </div>
-                    </div>
-                  </div>
-                </SectionCard>
-
-                <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {[
-                    { label: 'Total Users', value: totalUsers, tone: 'from-blue-50 to-indigo-50', text: 'text-blue-700' },
-                    { label: 'Total Images', value: totalImages, tone: 'from-violet-50 to-fuchsia-50', text: 'text-violet-700' },
-                    { label: 'Total Captions', value: totalCaptions, tone: 'from-emerald-50 to-teal-50', text: 'text-emerald-700' },
-                    { label: 'Avg Captions / Image', value: avgCaptionsPerImage, tone: 'from-amber-50 to-orange-50', text: 'text-amber-700' }
-                  ].map((metric) => (
-                    <article key={metric.label} className={`rounded-2xl border border-slate-200 bg-gradient-to-br ${metric.tone} p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md`}>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">{metric.label}</p>
-                      <p className={`mt-2 text-3xl font-bold ${metric.text}`}>{metric.value}</p>
-                    </article>
-                  ))}
-                </section>
-
-                <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-                  {[
-                    { label: 'Caption Requests', value: totalRequests },
-                    { label: 'Flavor Steps (loaded)', value: humorFlavorSteps.rows.length },
-                    { label: 'Humor Mix Rows', value: humorFlavorMix.rows.length },
-                    { label: 'LLM Models', value: totalModels },
-                    { label: 'LLM Providers', value: totalProviders },
-                    { label: 'Terms', value: terms.rows.length }
-                  ].map((stat) => (
-                    <article key={stat.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">{stat.label}</p>
-                      <p className="mt-1 text-xl font-bold text-slate-900">{stat.value}</p>
-                    </article>
-                  ))}
-                </section>
-
-                <section className="grid gap-6 lg:grid-cols-2">
-                  <SectionCard title="Top Captions" subtitle="Ranked by net vote score (upvotes minus downvotes).">
-                    <div className="space-y-3">
-                      {topCaptions.length ? (
-                        topCaptions.map((caption) => {
-                          const previewUrl = imagePreviewById.get(caption.imageId)
-                          return (
-                            <article key={caption.id || caption.text} className="grid grid-cols-[72px_1fr_auto] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                              <div className="h-16 w-16 overflow-hidden rounded-lg border border-slate-200 bg-slate-200">
-                                {previewUrl ? <Image alt="Caption preview" className="h-full w-full object-cover" height={64} src={previewUrl} unoptimized width={64} /> : <div className="flex h-full items-center justify-center text-[10px] text-slate-500">No image preview</div>}
-                              </div>
-                              <div>
-                                <p className="line-clamp-2 text-sm font-semibold text-slate-900">{caption.text || 'No caption content available.'}</p>
-                                <p className="mt-1 text-xs text-slate-500">Caption ID: {caption.id || 'unknown'}</p>
-                              </div>
-                              <span className="h-fit rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700">{caption.votes} score</span>
-                            </article>
-                          )
-                        })
-                      ) : (
-                        <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">No caption vote data available yet.</p>
-                      )}
-                    </div>
-                  </SectionCard>
-
-                  <SectionCard title="Caption Activity (7 days)" subtitle="Recent caption creation activity from latest loaded caption records.">
-                    <div className="space-y-3">
-                      {dateSeries.map((day) => {
-                        const widthPct = Math.max((day.value / maxActivity) * 100, day.value > 0 ? 8 : 2)
-                        return (
-                          <div key={day.key} className="grid grid-cols-[40px_1fr_32px] items-center gap-2">
-                            <span className="text-xs font-semibold text-slate-500">{day.label}</span>
-                            <div className="h-3 rounded-full bg-slate-200">
-                              <div className="h-3 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500" style={{ width: `${widthPct}%` }} />
-                            </div>
-                            <span className="text-xs font-semibold text-slate-600">{day.value}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </SectionCard>
-                </section>
-
-                <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-                  <SectionCard title="Vote & Request Summary" subtitle="Operational quality signals from vote balance and request throughput.">
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <article className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><p className="text-xs uppercase tracking-wide text-emerald-700">Upvotes</p><p className="mt-1 text-2xl font-bold text-emerald-800">{upvotes}</p></article>
-                      <article className="rounded-xl border border-rose-200 bg-rose-50 p-4"><p className="text-xs uppercase tracking-wide text-rose-700">Downvotes</p><p className="mt-1 text-2xl font-bold text-rose-800">{downvotes}</p></article>
-                      <article className="rounded-xl border border-indigo-200 bg-indigo-50 p-4"><p className="text-xs uppercase tracking-wide text-indigo-700">Net Vote</p><p className="mt-1 text-2xl font-bold text-indigo-800">{netVotes}</p></article>
-                    </div>
-                    <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Queue Status</p>
-                      <p className="mt-2 text-2xl font-bold text-slate-900">{totalRequests} requests tracked</p>
-                      <p className="text-xs text-slate-500">Use Caption Requests workspace for triage and monitoring.</p>
-                    </div>
-                  </SectionCard>
-
-                  <SectionCard title="Quick Navigation" subtitle="Jump to high-impact workspaces.">
-                    <div className="grid gap-2">
-                      {[
-                        { label: 'Images', view: 'images', hint: 'Upload and moderate image records.' },
-                        { label: 'Caption Requests', view: 'caption-requests', hint: 'Triage request pipeline.' },
-                        { label: 'Flavors', view: 'flavors', hint: 'Adjust humor strategy.' },
-                        { label: 'Humor Mix', view: 'humor-mix', hint: 'Tune default flavor logic.' },
-                        { label: 'Users', view: 'users', hint: 'Review admin access.' },
-                        { label: 'Whitelisted Emails', view: 'whitelisted-emails', hint: 'Refine invite permissions.' }
-                      ].map((link) => (
-                        <a key={link.view} className="rounded-xl border border-slate-200 bg-slate-50 p-3 transition hover:border-indigo-300 hover:bg-indigo-50" href={`/?view=${link.view}`}>
-                          <p className="text-sm font-semibold text-slate-900">{link.label}</p>
-                          <p className="text-xs text-slate-500">{link.hint}</p>
-                        </a>
-                      ))}
-                    </div>
-                  </SectionCard>
-                </section>
-              </>
-            ) : null}
-
-            {selectedView === 'users' ? <UsersSection rows={profiles.rows} /> : null}
-            {selectedView === 'images' ? <ImagesSection createImageRow={createImageRow} deleteImageRow={deleteImageRow} rows={images.rows} updateImageRow={updateImageRow} /> : null}
-            {selectedView === 'captions' ? <CaptionsSection rows={captions.rows} voteScores={votesByCaption} /> : null}
-            {selectedView === 'caption-requests' ? <CaptionRequestsSection rows={captionRequests.rows} /> : null}
-            {selectedView === 'flavors' || selectedView === 'flavor-steps' ? <FlavorsSection flavors={humorFlavors.rows} steps={humorFlavorSteps.rows} /> : null}
-            {selectedView === 'humor-mix' ? <HumorMixSection rows={humorFlavorMix.rows} updateHumorMixRow={updateHumorMixRow} /> : null}
-            {selectedView === 'caption-examples' ? <CaptionExamplesSection rows={captionExamples.rows} /> : null}
-            {selectedView === 'terms' ? <TermsSection createTerm={createTerm} deleteTerm={deleteTerm} rows={terms.rows} updateTerm={updateTerm} /> : null}
-            {selectedView === 'models' ? <LlmModelsSection rows={llmModels.rows} updateModel={updateModel} /> : null}
-            {selectedView === 'providers' ? <LlmProvidersSection createProvider={createProvider} deleteProvider={deleteProvider} rows={llmProviders.rows} updateProvider={updateProvider} /> : null}
-            {selectedView === 'prompt-chains' ? <PromptChainsSection rows={llmPromptChains.rows} /> : null}
-            {selectedView === 'responses' ? <ResponsesSection rows={llmResponses.rows} /> : null}
-            {selectedView === 'allowed-domains' ? <AllowedDomainsSection createDomain={createDomain} deleteDomain={deleteDomain} rows={allowedSignupDomains.rows} toggleDomain={toggleDomain} /> : null}
-            {selectedView === 'whitelisted-emails' ? <WhitelistedEmailsSection createEmail={createWhitelistedEmail} deleteEmail={deleteWhitelistedEmail} rows={whitelistedEmailAddresses.rows} /> : null}
-
-            {false ? (
-              <SectionCard title={selectedItem?.label ?? 'Workspace'} subtitle={selectedItem?.description ?? 'Section workspace'}>
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                  <p className="text-sm font-semibold text-slate-700">Phase 4 placeholder</p>
-                  <p className="mt-1 text-sm text-slate-600">This section is intentionally queued for the next phase to keep Phase 3 focused on requested modules.</p>
-                </div>
-              </SectionCard>
-            ) : null}
-
-            {['images', 'terms', 'providers', 'allowed-domains', 'whitelisted-emails'].includes(selectedView) ? (
-              <a className="fixed bottom-6 right-6 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-indigo-700" href="#quick-create">
-                + Quick Create
-              </a>
-            ) : null}
+            <PromptChainStudioSection
+              captions={captions}
+              createFlavor={createFlavor}
+              createStep={createStep}
+              deleteFlavor={deleteFlavor}
+              deleteStep={deleteStep}
+              duplicateFlavor={duplicateFlavor}
+              flavors={flavors}
+              images={images}
+              mixes={mixes}
+              promptChains={promptChains}
+              reorderStep={reorderStep}
+              responses={responses}
+              selectedView={selectedView}
+              steps={steps}
+              updateFlavor={updateFlavor}
+              updateStep={updateStep}
+            />
           </main>
         </div>
       </div>
