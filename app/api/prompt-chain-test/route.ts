@@ -116,9 +116,9 @@ export async function POST(request: Request) {
     const captionTexts = normalizeGeneratedCaptions(parsed)
 
     const captionRows = captionTexts.map((text) => ({
-      humor_flavor_id: flavorId,
+      content: text,
       image_id: imageId,
-      caption: text,
+      humor_flavor_id: Number(flavorId),
       created_by_user_id: userId,
       modified_by_user_id: userId
     }))
