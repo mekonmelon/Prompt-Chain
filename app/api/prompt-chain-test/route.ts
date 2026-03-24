@@ -148,6 +148,8 @@ export async function POST(request: Request) {
       content: text,
       image_id: imageId,
       humor_flavor_id: flavorId,
+      is_public: false,
+      profile_id: userId,
       created_by_user_id: userId,
       modified_by_user_id: userId
     }))
