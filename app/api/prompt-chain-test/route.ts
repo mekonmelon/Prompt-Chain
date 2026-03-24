@@ -14,32 +14,44 @@ export async function POST(request: Request) {
     )
   }
 
-  const upstream = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json'
-    },
-    body: JSON.stringify(payload),
-    cache: 'no-store'
-  })
+  try {
+    const upstream = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store'
+    })
 
-  const responseText = await upstream.text()
+    const contentType = upstream.headers.get('content-type') || ''
+    const responseText = await upstream.text()
 
-  if (!upstream.ok) {
     return NextResponse.json(
       {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        errorText: responseText
+        upstreamStatus: upstream.status,
+        upstreamStatusText: upstream.statusText,
+        upstreamContentType: contentType,
+        parsed: contentType.includes('application/json')
+          ? (() => {
+              try {
+                return JSON.parse(responseText)
+              } catch {
+                return null
+              }
+            })()
+          : null,
+        rawText: responseText
       },
-      { status: upstream.status }
+      { status: 200 }
     )
-  }
-
-  try {
-    return NextResponse.json(JSON.parse(responseText), { status: upstream.status })
-  } catch {
-    return NextResponse.json({ rawText: responseText }, { status: upstream.status })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        errorText: error instanceof Error ? error.message : 'Unknown upstream fetch error'
+      },
+      { status: 500 }
+    )
   }
 }
