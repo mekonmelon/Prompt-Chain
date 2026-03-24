@@ -1,5 +1,5 @@
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 
 const API_BASE = 'https://api.almostcrackd.ai'
 
@@ -13,7 +13,8 @@ function normalizeGeneratedCaptions(payload: unknown): string[] {
           const row = item as Record<string, unknown>
           const content = typeof row.content === 'string' ? row.content : null
           const caption = typeof row.caption === 'string' ? row.caption : null
-          return (content ?? caption ?? '').trim()
+          const text = typeof row.text === 'string' ? row.text : null
+          return (content ?? caption ?? text ?? '').trim()
         }
 
         return ''
@@ -21,20 +22,37 @@ function normalizeGeneratedCaptions(payload: unknown): string[] {
       .filter(Boolean)
   }
 
-  if (payload && typeof payload === 'object' && 'captions' in payload) {
-    return normalizeGeneratedCaptions((payload as { captions?: unknown }).captions)
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>
+
+    if (Array.isArray(obj.captions)) return normalizeGeneratedCaptions(obj.captions)
+    if (Array.isArray(obj.data)) return normalizeGeneratedCaptions(obj.data)
+    if (Array.isArray(obj.results)) return normalizeGeneratedCaptions(obj.results)
   }
 
   return []
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies()
-  const accessToken = cookieStore.get('sb-access-token')?.value
+  const supabase = await createClient()
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession()
+
+  if (sessionError) {
+    return NextResponse.json(
+      { errorText: `Could not read auth session: ${sessionError.message}` },
+      { status: 401 }
+    )
+  }
+
+  const accessToken = session?.access_token
 
   if (!accessToken) {
     return NextResponse.json(
-      { errorText: 'Not signed in. Missing sb-access-token cookie.' },
+      { errorText: 'Not signed in. No Supabase access token found in the current session.' },
       { status: 401 }
     )
   }
@@ -56,15 +74,16 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
       },
       body: JSON.stringify({ imageId }),
       cache: 'no-store'
     })
 
     const responseText = await upstream.text()
-    let parsed: unknown = null
 
+    let parsed: unknown = null
     try {
       parsed = responseText ? JSON.parse(responseText) : null
     } catch {
@@ -75,8 +94,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           errorText:
-            typeof parsed === 'object' && parsed && 'error' in parsed
-              ? String((parsed as Record<string, unknown>).error)
+            typeof parsed === 'object' && parsed && 'message' in parsed
+              ? String((parsed as Record<string, unknown>).message)
               : responseText || `Upstream failed with ${upstream.status}`,
           upstreamStatus: upstream.status,
           upstreamStatusText: upstream.statusText,
