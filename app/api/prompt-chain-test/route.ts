@@ -49,8 +49,9 @@ export async function POST(request: Request) {
   }
 
   const accessToken = session?.access_token
+  const userId = session?.user?.id
 
-  if (!accessToken) {
+  if (!accessToken || !userId) {
     return NextResponse.json(
       { errorText: 'Not signed in. No Supabase access token found in the current session.' },
       { status: 401 }
@@ -65,6 +66,13 @@ export async function POST(request: Request) {
   if (!imageId) {
     return NextResponse.json(
       { errorText: 'Missing imageId.' },
+      { status: 400 }
+    )
+  }
+
+  if (!flavorId) {
+    return NextResponse.json(
+      { errorText: 'Missing flavorId.' },
       { status: 400 }
     )
   }
@@ -107,6 +115,30 @@ export async function POST(request: Request) {
 
     const captionTexts = normalizeGeneratedCaptions(parsed)
 
+    const captionRows = captionTexts.map((text) => ({
+      humor_flavor_id: flavorId,
+      image_id: imageId,
+      caption: text,
+      created_by_user_id: userId,
+      modified_by_user_id: userId
+    }))
+
+    if (captionRows.length) {
+      const { error: insertError } = await supabase
+        .from('captions')
+        .insert(captionRows)
+
+      if (insertError) {
+        return NextResponse.json(
+          {
+            errorText: `Captions were generated but could not be saved: ${insertError.message}`,
+            rawUpstream: parsed
+          },
+          { status: 500 }
+        )
+      }
+    }
+
     return NextResponse.json({
       flavorId,
       imageId,
@@ -119,7 +151,8 @@ export async function POST(request: Request) {
         flavor_id: flavorId,
         created_at: new Date().toISOString()
       })),
-      rawUpstream: parsed
+      rawUpstream: parsed,
+      savedCount: captionRows.length
     })
   } catch (error) {
     return NextResponse.json(
