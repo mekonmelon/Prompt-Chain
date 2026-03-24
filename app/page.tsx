@@ -364,7 +364,6 @@ export default async function Home({
     )
   }
 
-  // ✅ FETCH SOURCE FLAVOR INSIDE ACTION (CRITICAL)
   const { data: sourceFlavor, error: flavorError } = await supabase
     .from(TABLES.flavors)
     .select('*')
@@ -384,7 +383,6 @@ export default async function Home({
   const sourceDescription = getFlavorDescription(sourceFlavor)
   const sourceSlug = getFlavorSlug(sourceFlavor)
 
-  // ✅ FETCH ALL FLAVORS FOR SLUG COLLISION CHECK
   const { data: allFlavors } = await supabase
     .from(TABLES.flavors)
     .select('slug')
@@ -424,11 +422,26 @@ export default async function Home({
 
     const newFlavorId = insertedFlavor.id
 
-    // ✅ FETCH STEPS INSIDE ACTION (CRITICAL)
-    const { data: relatedSteps } = await supabase
+    const { data: relatedSteps, error: relatedStepsError } = await supabase
       .from(TABLES.steps)
       .select('*')
       .eq(stepFlavorKey, id)
+
+    if (relatedStepsError) {
+      await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
+
+      redirect(
+        buildRedirectUrl(
+          'flavors',
+          {
+            type: 'error',
+            scope: 'flavor-duplicate',
+            message: relatedStepsError.message
+          },
+          id
+        )
+      )
+    }
 
     const sortedSteps = sortSteps(relatedSteps ?? [])
 
@@ -448,7 +461,9 @@ export default async function Home({
         ...(stepBodyKey in step && { [stepBodyKey]: step[stepBodyKey] ?? null })
       }))
 
-      const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+      const { error: insertStepsError } = await supabase
+        .from(TABLES.steps)
+        .insert(stepPayloads)
 
       if (insertStepsError) {
         await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
@@ -468,7 +483,6 @@ export default async function Home({
     }
 
     revalidatePath('/')
-
     redirect(
       buildRedirectUrl(
         'flavors',
@@ -477,6 +491,16 @@ export default async function Home({
       )
     )
   } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'digest' in error &&
+      typeof (error as { digest?: unknown }).digest === 'string' &&
+      (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+    ) {
+      throw error
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error'
 
     redirect(
