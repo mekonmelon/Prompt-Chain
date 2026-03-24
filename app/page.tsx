@@ -18,7 +18,6 @@ import {
   moveItem,
   pickFirstKey,
   resequenceRows,
-  slugify,
   sortSteps,
   STEP_BODY_KEYS,
   STEP_INPUT_TYPE_KEYS,
@@ -80,6 +79,29 @@ function isView(value: string): value is ViewId {
 function buildOptionalString(value: FormDataEntryValue | null) {
   const text = String(value ?? '').trim()
   return text || null
+}
+
+function buildOptionalInteger(value: FormDataEntryValue | null) {
+  const text = String(value ?? '').trim()
+  if (!text) return { value: null, error: null }
+  if (!/^-?\d+$/.test(text)) {
+    return { value: null, error: `Expected an integer value but received "${text}".` }
+  }
+  const parsed = Number(text)
+  if (!Number.isSafeInteger(parsed)) {
+    return { value: null, error: `Integer value "${text}" is outside the supported range.` }
+  }
+  return { value: parsed, error: null }
+}
+
+function buildOptionalFloat(value: FormDataEntryValue | null) {
+  const text = String(value ?? '').trim()
+  if (!text) return { value: null, error: null }
+  const parsed = Number(text)
+  if (!Number.isFinite(parsed)) {
+    return { value: null, error: `Expected a numeric value but received "${text}".` }
+  }
+  return { value: parsed, error: null }
 }
 
 function buildRedirectUrl(view: ViewId, feedback?: StudioFeedback, selectedFlavorId?: string) {
@@ -189,75 +211,109 @@ export default async function Home({
   const stepOutputTypeKey = pickFirstKey(steps, STEP_OUTPUT_TYPE_KEYS) ?? 'llm_output_type_id'
   const stepTemperatureKey = pickFirstKey(steps, STEP_TEMPERATURE_KEYS) ?? 'llm_temperature'
   const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS) ?? 'llm_model_id'
+  const stepFlavorKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'humor_flavor_id'
+  const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'order_by'
 
   async function createFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
-    const description = String(formData.get('description') ?? '').trim()
     const rawSlug = String(formData.get('slug') ?? '').trim()
-    const slug = slugify(rawSlug)
+    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    const description = String(formData.get('description') ?? '').trim()
 
     if (!profile?.id) {
+      console.error('[studio.action] create flavor validation failed: missing authorized profile')
       redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'You must be signed in as an authorized profile to create a flavor.' }))
     }
 
-    if (!description || !slug) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'Create flavor requires both a description and a valid slug.' }))
+    if (!slug) {
+      console.error('[studio.action] create flavor validation failed', { rawSlug })
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'Create flavor requires a valid slug.' }))
     }
 
+    let insertedId = ''
+    let actionError: string | null = null
+
     try {
+      const payload: GenericRow = {
+        slug,
+        description: description || null,
+        created_by_user_id: profile.id,
+        modified_by_user_id: profile.id
+      }
+
       const { data, error } = await supabase
         .from(TABLES.flavors)
-        .insert({
-          description,
-          slug,
-          created_by_user_id: profile.id,
-          modified_by_user_id: profile.id
-        })
+        .insert(payload)
         .select('id')
         .single()
 
       if (error) {
-        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: `Could not create flavor: ${error.message}` }))
+        console.error('[studio.action] create flavor db error', { message: error.message, code: error.code })
+        actionError = `Could not create flavor: ${error.message}`
+      } else {
+        insertedId = asText(data?.id)
+        console.info('[studio.action] create flavor success', { flavorId: insertedId, profileId: profile.id })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${description}”.` }, asText(data?.id)))
     } catch (error) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: error instanceof Error ? `Could not create flavor: ${error.message}` : 'Could not create flavor.' }))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] create flavor unexpected exception', { message })
+      actionError = `Could not create flavor: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: actionError }))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${slug}”.` }, insertedId))
   }
 
   async function updateFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
+    const rawSlug = String(formData.get('slug') ?? '').trim()
+    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const description = String(formData.get('description') ?? '').trim()
-    const slug = slugify(String(formData.get('slug') ?? '').trim())
 
-    if (!id || !profile?.id || !description || !slug) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: 'Update flavor requires an id, description, and valid slug.' }, id))
+    if (!id || !profile?.id || !slug) {
+      console.error('[studio.action] update flavor validation failed', { id, hasProfile: Boolean(profile?.id), rawSlug })
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: 'Update flavor requires an id and valid slug.' }, id))
     }
 
+    let actionError: string | null = null
+
     try {
+      const payload: GenericRow = {
+        slug,
+        description: description || null,
+        modified_by_user_id: profile.id
+      }
+
       const { error } = await supabase
         .from(TABLES.flavors)
-        .update({
-          description,
-          slug,
-          modified_by_user_id: profile.id
-        })
+        .update(payload)
         .eq('id', id)
 
       if (error) {
-        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: `Could not save flavor changes: ${error.message}` }, id))
+        console.error('[studio.action] update flavor db error', { flavorId: id, message: error.message, code: error.code })
+        actionError = `Could not save flavor changes: ${error.message}`
+      } else {
+        console.info('[studio.action] update flavor success', { flavorId: id, profileId: profile.id })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-update', message: 'Flavor changes saved.' }, id))
     } catch (error) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: error instanceof Error ? `Could not save flavor changes: ${error.message}` : 'Could not save flavor changes.' }, id))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] update flavor unexpected exception', { flavorId: id, message })
+      actionError = `Could not save flavor changes: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: actionError }, id))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-update', message: 'Flavor changes saved.' }, id))
   }
 
   async function deleteFlavor(formData: FormData) {
@@ -265,20 +321,31 @@ export default async function Home({
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
     if (!id) {
+      console.error('[studio.action] delete flavor validation failed: missing flavor id')
       redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: 'Delete flavor requires a valid id.' }))
     }
 
+    let actionError: string | null = null
     try {
       const { error } = await supabase.from(TABLES.flavors).delete().eq('id', id)
       if (error) {
-        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: `Could not delete flavor: ${error.message}` }))
+        console.error('[studio.action] delete flavor db error', { flavorId: id, message: error.message, code: error.code })
+        actionError = `Could not delete flavor: ${error.message}`
+      } else {
+        console.info('[studio.action] delete flavor success', { flavorId: id, profileId: profile?.id ?? null })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-delete', message: 'Flavor deleted.' }))
     } catch (error) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: error instanceof Error ? `Could not delete flavor: ${error.message}` : 'Could not delete flavor.' }))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] delete flavor unexpected exception', { flavorId: id, message })
+      actionError = `Could not delete flavor: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: actionError }))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-delete', message: 'Flavor deleted.' }))
   }
 
   async function duplicateFlavor(formData: FormData) {
@@ -287,65 +354,132 @@ export default async function Home({
     const id = String(formData.get('id') ?? '').trim()
 
     if (!id || !profile?.id) {
+      console.error('[studio.action] duplicate flavor validation failed', { id, hasProfile: Boolean(profile?.id) })
       redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: 'Duplicate flavor requires a valid source flavor.' }, id))
     }
 
     const sourceFlavor = flavors.find((row) => getFlavorId(row) === id)
     if (!sourceFlavor) {
+      console.error('[studio.action] duplicate flavor validation failed: source flavor missing from loaded rows', { flavorId: id })
       redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: 'Source flavor could not be found in the loaded dataset.' }, id))
     }
 
     const sourceDescription = getFlavorDescription(sourceFlavor)
     const sourceSlug = getFlavorSlug(sourceFlavor)
-    const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : `Copy of ${sourceSlug || id}`
-    const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceDescription)
+    const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : null
+    const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceDescription || id)
+    let insertedFlavorId = ''
+    let actionError: string | null = null
 
     try {
+      const flavorPayload: GenericRow = {
+        slug: duplicateSlug,
+        description: duplicateDescription,
+        created_by_user_id: profile.id,
+        modified_by_user_id: profile.id
+      }
+      console.info('[studio.action] duplicate flavor insert prepared', {
+        sourceFlavorId: id,
+        duplicateSlug,
+        flavorPayloadKeys: Object.keys(flavorPayload)
+      })
+
       const { data: insertedFlavor, error: insertFlavorError } = await supabase
         .from(TABLES.flavors)
-        .insert({
-          description: duplicateDescription,
-          slug: duplicateSlug,
-          created_by_user_id: profile.id,
-          modified_by_user_id: profile.id
-        })
+        .insert(flavorPayload)
         .select('id')
         .single()
 
       if (insertFlavorError || !insertedFlavor?.id) {
-        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: `Could not duplicate flavor: ${insertFlavorError?.message ?? 'new flavor row was not created.'}` }, id))
-      }
+        console.error('[studio.action] duplicate flavor db error while inserting flavor', {
+          sourceFlavorId: id,
+          duplicateSlug,
+          flavorPayloadKeys: Object.keys(flavorPayload),
+          message: insertFlavorError?.message ?? 'missing inserted id',
+          code: insertFlavorError?.code ?? null
+        })
+        actionError = `Could not duplicate flavor: ${insertFlavorError?.message ?? 'new flavor row was not created.'}`
+      } else {
+        insertedFlavorId = asText(insertedFlavor.id)
+        console.info('[studio.action] duplicate flavor insert success', {
+          sourceFlavorId: id,
+          duplicateSlug,
+          insertedFlavorId
+        })
+        const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
+        if (relatedSteps.length) {
+          const stepPayloads = relatedSteps.map((step, index) => {
+            const payload: GenericRow = {
+              [stepFlavorKey]: insertedFlavorId,
+              created_by_user_id: profile.id,
+              modified_by_user_id: profile.id
+            }
 
-      const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
-      if (relatedSteps.length) {
-        const stepPayloads = relatedSteps.map((step, index) => ({
-          humor_flavor_id: insertedFlavor.id,
-          llm_temperature: step[stepTemperatureKey] ?? null,
-          order_by: getStepOrder(step) === Number.MAX_SAFE_INTEGER ? index + 1 : getStepOrder(step),
-          llm_input_type_id: step[stepInputTypeKey] ?? null,
-          llm_output_type_id: step[stepOutputTypeKey] ?? null,
-          llm_model_id: step[stepModelKey] ?? null,
-          humor_flavor_step_type_id: step[stepTitleKey] ?? null,
-          llm_system_prompt: step[stepSystemPromptKey] ?? null,
-          llm_user_prompt: step[stepUserPromptKey] ?? null,
-          description: step[stepBodyKey] ?? null,
-          created_by_user_id: profile.id,
-          modified_by_user_id: profile.id
-        }))
+            if (stepOrderKey in step) {
+              payload[stepOrderKey] = getStepOrder(step) === Number.MAX_SAFE_INTEGER ? index + 1 : getStepOrder(step)
+            }
+            if (stepTemperatureKey in step) {
+              payload[stepTemperatureKey] = asNumber(step[stepTemperatureKey])
+            }
+            if (stepInputTypeKey in step) {
+              payload[stepInputTypeKey] = asNumber(step[stepInputTypeKey])
+            }
+            if (stepOutputTypeKey in step) {
+              payload[stepOutputTypeKey] = asNumber(step[stepOutputTypeKey])
+            }
+            if (stepModelKey in step) {
+              payload[stepModelKey] = asNumber(step[stepModelKey])
+            }
+            if (stepTitleKey in step) {
+              payload[stepTitleKey] = asNumber(step[stepTitleKey])
+            }
+            if (stepSystemPromptKey in step) {
+              payload[stepSystemPromptKey] = step[stepSystemPromptKey] ?? null
+            }
+            if (stepUserPromptKey in step) {
+              payload[stepUserPromptKey] = step[stepUserPromptKey] ?? null
+            }
+            if (stepBodyKey in step) {
+              payload[stepBodyKey] = step[stepBodyKey] ?? null
+            }
 
-        const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+            return payload
+          })
+          console.info('[studio.action] duplicate flavor steps insert prepared', {
+            sourceFlavorId: id,
+            newFlavorId: insertedFlavorId,
+            stepCount: stepPayloads.length,
+            stepPayloadKeys: Object.keys(stepPayloads[0] ?? {})
+          })
 
-        if (insertStepsError) {
-          await supabase.from(TABLES.flavors).delete().eq('id', insertedFlavor.id)
-          redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: `Could not duplicate flavor steps: ${insertStepsError.message}` }, id))
+          const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+
+          if (insertStepsError) {
+            console.error('[studio.action] duplicate flavor db error while inserting steps', {
+              sourceFlavorId: id,
+              newFlavorId: insertedFlavorId,
+              stepPayloadKeys: Object.keys(stepPayloads[0] ?? {}),
+              message: insertStepsError.message,
+              code: insertStepsError.code
+            })
+            await supabase.from(TABLES.flavors).delete().eq('id', insertedFlavorId)
+            actionError = `Could not duplicate flavor steps: ${insertStepsError.message}`
+          }
         }
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-duplicate', message: `Duplicated flavor as “${duplicateDescription}”.` }, insertedFlavor.id))
     } catch (error) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: error instanceof Error ? `Could not duplicate flavor: ${error.message}` : 'Could not duplicate flavor.' }, id))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] duplicate flavor unexpected exception', { sourceFlavorId: id, message })
+      actionError = `Could not duplicate flavor: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: actionError }, id))
+    }
+
+    console.info('[studio.action] duplicate flavor success', { sourceFlavorId: id, newFlavorId: insertedFlavorId, profileId: profile.id })
+    revalidatePath('/')
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-duplicate', message: `Duplicated flavor as “${duplicateSlug}”.` }, insertedFlavorId))
   }
 
   async function createStep(formData: FormData) {
@@ -353,37 +487,60 @@ export default async function Home({
     const supabase = createClient()
     const flavorId = String(formData.get('flavor_id') ?? '').trim()
     if (!flavorId || !profile?.id) {
+      console.error('[studio.action] create step validation failed', { flavorId, hasProfile: Boolean(profile?.id) })
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: 'Create step requires a selected flavor.' }, flavorId))
     }
 
     const currentSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
     const nextOrder = (currentSteps.at(-1) ? getStepOrder(currentSteps.at(-1) as GenericRow) : 0) + 1
+    const inputType = buildOptionalInteger(formData.get('input_type'))
+    const outputType = buildOptionalInteger(formData.get('output_type'))
+    const modelId = buildOptionalInteger(formData.get('model_link'))
+    const stepType = buildOptionalInteger(formData.get('step_title'))
+    const temperature = buildOptionalFloat(formData.get('temperature'))
+
+    const validationErrors = [inputType.error, outputType.error, modelId.error, stepType.error, temperature.error].filter(Boolean)
+    if (validationErrors.length) {
+      console.error('[studio.action] create step validation failed', { flavorId, issues: validationErrors })
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: validationErrors.join(' ') }, flavorId))
+    }
+
+    let actionError: string | null = null
 
     try {
       const { error } = await supabase.from(TABLES.steps).insert({
-        humor_flavor_id: flavorId,
-        order_by: nextOrder,
-        humor_flavor_step_type_id: buildOptionalString(formData.get('step_title')),
-        description: buildOptionalString(formData.get('step_body')),
-        llm_system_prompt: buildOptionalString(formData.get('system_prompt')),
-        llm_user_prompt: buildOptionalString(formData.get('user_prompt')),
-        llm_input_type_id: buildOptionalString(formData.get('input_type')),
-        llm_output_type_id: buildOptionalString(formData.get('output_type')),
-        llm_temperature: asNumber(formData.get('temperature')),
-        llm_model_id: buildOptionalString(formData.get('model_link')),
+        [stepFlavorKey]: flavorId,
+        [stepOrderKey]: nextOrder,
+        [stepTitleKey]: stepType.value,
+        [stepBodyKey]: buildOptionalString(formData.get('step_body')),
+        [stepSystemPromptKey]: buildOptionalString(formData.get('system_prompt')),
+        [stepUserPromptKey]: buildOptionalString(formData.get('user_prompt')),
+        [stepInputTypeKey]: inputType.value,
+        [stepOutputTypeKey]: outputType.value,
+        [stepTemperatureKey]: temperature.value,
+        [stepModelKey]: modelId.value,
         created_by_user_id: profile.id,
         modified_by_user_id: profile.id
       })
 
       if (error) {
-        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: `Could not create step: ${error.message}` }, flavorId))
+        console.error('[studio.action] create step db error', { flavorId, message: error.message, code: error.code })
+        actionError = `Could not create step: ${error.message}`
+      } else {
+        console.info('[studio.action] create step success', { flavorId, profileId: profile.id })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-create', message: 'Step created.' }, flavorId))
     } catch (error) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: error instanceof Error ? `Could not create step: ${error.message}` : 'Could not create step.' }, flavorId))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] create step unexpected exception', { flavorId, message })
+      actionError = `Could not create step: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: actionError }, flavorId))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-create', message: 'Step created.' }, flavorId))
   }
 
   async function updateStep(formData: FormData) {
@@ -392,35 +549,57 @@ export default async function Home({
     const id = String(formData.get('id') ?? '').trim()
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
     if (!id || !profile?.id) {
+      console.error('[studio.action] update step validation failed', { stepId: id, returnFlavorId, hasProfile: Boolean(profile?.id) })
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: 'Update step requires a valid step id.' }, returnFlavorId))
     }
 
+    const inputType = buildOptionalInteger(formData.get('input_type'))
+    const outputType = buildOptionalInteger(formData.get('output_type'))
+    const modelId = buildOptionalInteger(formData.get('model_link'))
+    const stepType = buildOptionalInteger(formData.get('step_title'))
+    const order = buildOptionalInteger(formData.get('step_order'))
+    const temperature = buildOptionalFloat(formData.get('temperature'))
+    const validationErrors = [inputType.error, outputType.error, modelId.error, stepType.error, order.error, temperature.error].filter(Boolean)
+    if (validationErrors.length) {
+      console.error('[studio.action] update step validation failed', { stepId: id, returnFlavorId, issues: validationErrors })
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: validationErrors.join(' ') }, returnFlavorId))
+    }
+
+    let actionError: string | null = null
     try {
       const payload: GenericRow = {
         modified_by_user_id: profile.id,
-        humor_flavor_step_type_id: buildOptionalString(formData.get('step_title')),
-        description: buildOptionalString(formData.get('step_body')),
-        llm_system_prompt: buildOptionalString(formData.get('system_prompt')),
-        llm_user_prompt: buildOptionalString(formData.get('user_prompt')),
-        llm_input_type_id: buildOptionalString(formData.get('input_type')),
-        llm_output_type_id: buildOptionalString(formData.get('output_type')),
-        llm_temperature: asNumber(formData.get('temperature')),
-        llm_model_id: buildOptionalString(formData.get('model_link'))
+        [stepTitleKey]: stepType.value,
+        [stepBodyKey]: buildOptionalString(formData.get('step_body')),
+        [stepSystemPromptKey]: buildOptionalString(formData.get('system_prompt')),
+        [stepUserPromptKey]: buildOptionalString(formData.get('user_prompt')),
+        [stepInputTypeKey]: inputType.value,
+        [stepOutputTypeKey]: outputType.value,
+        [stepTemperatureKey]: temperature.value,
+        [stepModelKey]: modelId.value
       }
 
-      const order = asNumber(formData.get('step_order'))
-      if (order !== null) payload.order_by = order
+      if (order.value !== null) payload[stepOrderKey] = order.value
 
       const { error } = await supabase.from(TABLES.steps).update(payload).eq('id', id)
       if (error) {
-        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: `Could not save step: ${error.message}` }, returnFlavorId))
+        console.error('[studio.action] update step db error', { stepId: id, returnFlavorId, message: error.message, code: error.code })
+        actionError = `Could not save step: ${error.message}`
+      } else {
+        console.info('[studio.action] update step success', { stepId: id, returnFlavorId, profileId: profile.id })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-update', message: 'Step saved.' }, returnFlavorId))
     } catch (error) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: error instanceof Error ? `Could not save step: ${error.message}` : 'Could not save step.' }, returnFlavorId))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] update step unexpected exception', { stepId: id, returnFlavorId, message })
+      actionError = `Could not save step: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: actionError }, returnFlavorId))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-update', message: 'Step saved.' }, returnFlavorId))
   }
 
   async function deleteStep(formData: FormData) {
@@ -429,20 +608,31 @@ export default async function Home({
     const id = String(formData.get('id') ?? '').trim()
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
     if (!id) {
+      console.error('[studio.action] delete step validation failed', { returnFlavorId })
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: 'Delete step requires a valid step id.' }, returnFlavorId))
     }
 
+    let actionError: string | null = null
     try {
       const { error } = await supabase.from(TABLES.steps).delete().eq('id', id)
       if (error) {
-        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: `Could not delete step: ${error.message}` }, returnFlavorId))
+        console.error('[studio.action] delete step db error', { stepId: id, returnFlavorId, message: error.message, code: error.code })
+        actionError = `Could not delete step: ${error.message}`
+      } else {
+        console.info('[studio.action] delete step success', { stepId: id, returnFlavorId, profileId: profile?.id ?? null })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-delete', message: 'Step deleted.' }, returnFlavorId))
     } catch (error) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: error instanceof Error ? `Could not delete step: ${error.message}` : 'Could not delete step.' }, returnFlavorId))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] delete step unexpected exception', { stepId: id, returnFlavorId, message })
+      actionError = `Could not delete step: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: actionError }, returnFlavorId))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-delete', message: 'Step deleted.' }, returnFlavorId))
   }
 
   async function reorderStep(formData: FormData) {
@@ -453,39 +643,53 @@ export default async function Home({
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
 
     if (!id || !profile?.id || !['up', 'down'].includes(direction)) {
+      console.error('[studio.action] reorder step validation failed', { stepId: id, direction, returnFlavorId, hasProfile: Boolean(profile?.id) })
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Move step requires a valid step id and direction.' }, returnFlavorId))
     }
 
     const target = steps.find((row) => getRowId(row) === id)
     if (!target) {
+      console.error('[studio.action] reorder step validation failed: step missing in loaded rows', { stepId: id, returnFlavorId })
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Could not find the selected step to reorder.' }, returnFlavorId))
     }
 
+    let actionError: string | null = null
+    let redirectFlavorId = returnFlavorId
     try {
       const flavorId = getStepFlavorId(target)
+      redirectFlavorId = flavorId || returnFlavorId
       const siblings = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
       const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
       const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-      const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), 'order_by')
+      const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), stepOrderKey)
 
       const updates = reordered.map((row) =>
         supabase
           .from(TABLES.steps)
-          .update({ order_by: row.order_by, modified_by_user_id: profile.id })
+          .update({ [stepOrderKey]: row[stepOrderKey], modified_by_user_id: profile.id })
           .eq('id', getRowId(row))
       )
 
       const results = await Promise.all(updates)
       const error = results.find((result) => result.error)?.error
       if (error) {
-        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: `Could not reorder steps: ${error.message}` }, flavorId || returnFlavorId))
+        console.error('[studio.action] reorder step db error', { stepId: id, direction, flavorId: redirectFlavorId, message: error.message, code: error.code })
+        actionError = `Could not reorder steps: ${error.message}`
+      } else {
+        console.info('[studio.action] reorder step success', { stepId: id, direction, flavorId: redirectFlavorId, profileId: profile.id })
       }
-
-      revalidatePath('/')
-      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-reorder', message: 'Step order updated.' }, flavorId || returnFlavorId))
     } catch (error) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: error instanceof Error ? `Could not reorder steps: ${error.message}` : 'Could not reorder steps.' }, returnFlavorId))
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[studio.action] reorder step unexpected exception', { stepId: id, direction, returnFlavorId, message })
+      actionError = `Could not reorder steps: ${message}`
     }
+
+    if (actionError) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: actionError }, redirectFlavorId))
+    }
+
+    revalidatePath('/')
+    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-reorder', message: 'Step order updated.' }, redirectFlavorId))
   }
 
   return (
