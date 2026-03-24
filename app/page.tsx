@@ -6,10 +6,12 @@ import {
   asNumber,
   asText,
   buildDuplicateSlug,
+  FLAVOR_NAME_KEYS,
   FLAVOR_RELATION_KEYS,
   GenericRow,
   getFlavorDescription,
   getFlavorId,
+  getFlavorName,
   getFlavorSlug,
   getRowId,
   getStepFlavorId,
@@ -365,6 +367,7 @@ export default async function Home({
     }
 
     const sourceDescription = getFlavorDescription(sourceFlavor)
+    const sourceName = getFlavorName(sourceFlavor)
     const sourceSlug = getFlavorSlug(sourceFlavor)
     const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : null
     const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceDescription || id)
