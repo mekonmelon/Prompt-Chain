@@ -381,6 +381,11 @@ export default async function Home({
         created_by_user_id: profile.id,
         modified_by_user_id: profile.id
       }
+      console.info('[studio.action] duplicate flavor insert prepared', {
+        sourceFlavorId: id,
+        duplicateSlug,
+        flavorPayloadKeys: Object.keys(flavorPayload)
+      })
 
       const { data: insertedFlavor, error: insertFlavorError } = await supabase
         .from(TABLES.flavors)
@@ -389,31 +394,72 @@ export default async function Home({
         .single()
 
       if (insertFlavorError || !insertedFlavor?.id) {
-        console.error('[studio.action] duplicate flavor db error while inserting flavor', { sourceFlavorId: id, message: insertFlavorError?.message ?? 'missing inserted id', code: insertFlavorError?.code ?? null })
+        console.error('[studio.action] duplicate flavor db error while inserting flavor', {
+          sourceFlavorId: id,
+          duplicateSlug,
+          flavorPayloadKeys: Object.keys(flavorPayload),
+          message: insertFlavorError?.message ?? 'missing inserted id',
+          code: insertFlavorError?.code ?? null
+        })
         actionError = `Could not duplicate flavor: ${insertFlavorError?.message ?? 'new flavor row was not created.'}`
       } else {
         insertedFlavorId = asText(insertedFlavor.id)
         const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
         if (relatedSteps.length) {
-          const stepPayloads = relatedSteps.map((step, index) => ({
-            [stepFlavorKey]: insertedFlavorId,
-            [stepTemperatureKey]: asNumber(step[stepTemperatureKey]),
-            [stepOrderKey]: getStepOrder(step) === Number.MAX_SAFE_INTEGER ? index + 1 : getStepOrder(step),
-            [stepInputTypeKey]: asNumber(step[stepInputTypeKey]),
-            [stepOutputTypeKey]: asNumber(step[stepOutputTypeKey]),
-            [stepModelKey]: asNumber(step[stepModelKey]),
-            [stepTitleKey]: asNumber(step[stepTitleKey]),
-            [stepSystemPromptKey]: step[stepSystemPromptKey] ?? null,
-            [stepUserPromptKey]: step[stepUserPromptKey] ?? null,
-            [stepBodyKey]: step[stepBodyKey] ?? null,
-            created_by_user_id: profile.id,
-            modified_by_user_id: profile.id
-          }))
+          const stepPayloads = relatedSteps.map((step, index) => {
+            const payload: GenericRow = {
+              [stepFlavorKey]: insertedFlavorId,
+              created_by_user_id: profile.id,
+              modified_by_user_id: profile.id
+            }
+
+            if (stepOrderKey in step) {
+              payload[stepOrderKey] = getStepOrder(step) === Number.MAX_SAFE_INTEGER ? index + 1 : getStepOrder(step)
+            }
+            if (stepTemperatureKey in step) {
+              payload[stepTemperatureKey] = asNumber(step[stepTemperatureKey])
+            }
+            if (stepInputTypeKey in step) {
+              payload[stepInputTypeKey] = asNumber(step[stepInputTypeKey])
+            }
+            if (stepOutputTypeKey in step) {
+              payload[stepOutputTypeKey] = asNumber(step[stepOutputTypeKey])
+            }
+            if (stepModelKey in step) {
+              payload[stepModelKey] = asNumber(step[stepModelKey])
+            }
+            if (stepTitleKey in step) {
+              payload[stepTitleKey] = asNumber(step[stepTitleKey])
+            }
+            if (stepSystemPromptKey in step) {
+              payload[stepSystemPromptKey] = step[stepSystemPromptKey] ?? null
+            }
+            if (stepUserPromptKey in step) {
+              payload[stepUserPromptKey] = step[stepUserPromptKey] ?? null
+            }
+            if (stepBodyKey in step) {
+              payload[stepBodyKey] = step[stepBodyKey] ?? null
+            }
+
+            return payload
+          })
+          console.info('[studio.action] duplicate flavor steps insert prepared', {
+            sourceFlavorId: id,
+            newFlavorId: insertedFlavorId,
+            stepCount: stepPayloads.length,
+            stepPayloadKeys: Object.keys(stepPayloads[0] ?? {})
+          })
 
           const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
 
           if (insertStepsError) {
-            console.error('[studio.action] duplicate flavor db error while inserting steps', { sourceFlavorId: id, newFlavorId: insertedFlavorId, message: insertStepsError.message, code: insertStepsError.code })
+            console.error('[studio.action] duplicate flavor db error while inserting steps', {
+              sourceFlavorId: id,
+              newFlavorId: insertedFlavorId,
+              stepPayloadKeys: Object.keys(stepPayloads[0] ?? {}),
+              message: insertStepsError.message,
+              code: insertStepsError.code
+            })
             await supabase.from(TABLES.flavors).delete().eq('id', insertedFlavorId)
             actionError = `Could not duplicate flavor steps: ${insertStepsError.message}`
           }
