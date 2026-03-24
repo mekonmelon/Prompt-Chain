@@ -443,6 +443,7 @@ export default async function Home({
     } catch (error) {
       redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: error instanceof Error ? `Could not delete step: ${error.message}` : 'Could not delete step.' }, returnFlavorId))
     }
+  }
 
   async function reorderStep(formData: FormData) {
     'use server'
