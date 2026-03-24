@@ -724,61 +724,165 @@ export default async function Home({
   }
 
   async function reorderStep(formData: FormData) {
-    'use server'
-    const supabase = await createClient()
-    const id = String(formData.get('id') ?? '').trim()
-    const direction = String(formData.get('direction') ?? '').trim()
-    const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
+  'use server'
 
-    if (!id || !profile?.id || !['up', 'down'].includes(direction)) {
-      console.error('[studio.action] reorder step validation failed', { stepId: id, direction, returnFlavorId, hasProfile: Boolean(profile?.id) })
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Move step requires a valid step id and direction.' }, returnFlavorId))
-    }
+  const supabase = await createClient()
+  const id = String(formData.get('id') ?? '').trim()
+  const direction = String(formData.get('direction') ?? '').trim()
+  const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
 
-    const target = steps.find((row) => getRowId(row) === id)
-    if (!target) {
-      console.error('[studio.action] reorder step validation failed: step missing in loaded rows', { stepId: id, returnFlavorId })
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Could not find the selected step to reorder.' }, returnFlavorId))
-    }
-
-    let actionError: string | null = null
-    let redirectFlavorId = returnFlavorId
-    try {
-      const flavorId = getStepFlavorId(target)
-      redirectFlavorId = flavorId || returnFlavorId
-      const siblings = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
-      const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
-      const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-      const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), stepOrderKey)
-
-      const updates = reordered.map((row) =>
-        supabase
-          .from(TABLES.steps)
-          .update({ [stepOrderKey]: row[stepOrderKey], modified_by_user_id: profile.id })
-          .eq('id', getRowId(row))
+  if (!id || !profile?.id || !['up', 'down'].includes(direction)) {
+    console.error('[studio.action] reorder step validation failed', {
+      stepId: id,
+      direction,
+      returnFlavorId,
+      hasProfile: Boolean(profile?.id)
+    })
+    redirect(
+      buildRedirectUrl(
+        'steps',
+        { type: 'error', scope: 'step-reorder', message: 'Move step requires a valid step id and direction.' },
+        returnFlavorId
       )
-
-      const results = await Promise.all(updates)
-      const error = results.find((result) => result.error)?.error
-      if (error) {
-        console.error('[studio.action] reorder step db error', { stepId: id, direction, flavorId: redirectFlavorId, message: error.message, code: error.code })
-        actionError = `Could not reorder steps: ${error.message}`
-      } else {
-        console.info('[studio.action] reorder step success', { stepId: id, direction, flavorId: redirectFlavorId, profileId: profile.id })
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      console.error('[studio.action] reorder step unexpected exception', { stepId: id, direction, returnFlavorId, message })
-      actionError = `Could not reorder steps: ${message}`
-    }
-
-    if (actionError) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: actionError }, redirectFlavorId))
-    }
-
-    revalidatePath('/')
-    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-reorder', message: 'Step order updated.' }, redirectFlavorId))
+    )
   }
+
+  let actionError: string | null = null
+  let redirectFlavorId = returnFlavorId
+
+  try {
+    const { data: target, error: targetError } = await supabase
+      .from(TABLES.steps)
+      .select('*')
+      .eq('id', id)
+      .single()
+
+    if (targetError || !target) {
+      console.error('[studio.action] reorder step target fetch failed', {
+        stepId: id,
+        message: targetError?.message,
+        code: targetError?.code
+      })
+      redirect(
+        buildRedirectUrl(
+          'steps',
+          { type: 'error', scope: 'step-reorder', message: 'Could not find the selected step to reorder.' },
+          returnFlavorId
+        )
+      )
+    }
+
+    const flavorId = getStepFlavorId(target)
+    redirectFlavorId = flavorId || returnFlavorId
+
+    const { data: siblingRows, error: siblingsError } = await supabase
+      .from(TABLES.steps)
+      .select('*')
+      .eq(stepFlavorKey, flavorId)
+
+    if (siblingsError) {
+      console.error('[studio.action] reorder step sibling fetch failed', {
+        stepId: id,
+        direction,
+        flavorId: redirectFlavorId,
+        message: siblingsError.message,
+        code: siblingsError.code
+      })
+      redirect(
+        buildRedirectUrl(
+          'steps',
+          { type: 'error', scope: 'step-reorder', message: `Could not load sibling steps: ${siblingsError.message}` },
+          redirectFlavorId
+        )
+      )
+    }
+
+    const siblings = sortSteps((siblingRows ?? []) as GenericRow[])
+    const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
+    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+
+    if (currentIndex === -1 || nextIndex < 0 || nextIndex >= siblings.length) {
+      redirect(
+        buildRedirectUrl(
+          'steps',
+          { type: 'success', scope: 'step-reorder', message: 'Step order unchanged.' },
+          redirectFlavorId
+        )
+      )
+    }
+
+    const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), stepOrderKey)
+
+    const updates = reordered.map((row) =>
+      supabase
+        .from(TABLES.steps)
+        .update({
+          [stepOrderKey]: row[stepOrderKey],
+          modified_by_user_id: profile.id
+        })
+        .eq('id', getRowId(row))
+    )
+
+    const results = await Promise.all(updates)
+    const error = results.find((result) => result.error)?.error
+
+    if (error) {
+      console.error('[studio.action] reorder step db error', {
+        stepId: id,
+        direction,
+        flavorId: redirectFlavorId,
+        message: error.message,
+        code: error.code
+      })
+      actionError = `Could not reorder steps: ${error.message}`
+    } else {
+      console.info('[studio.action] reorder step success', {
+        stepId: id,
+        direction,
+        flavorId: redirectFlavorId,
+        profileId: profile.id
+      })
+    }
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'digest' in error &&
+      typeof (error as { digest?: unknown }).digest === 'string' &&
+      (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+    ) {
+      throw error
+    }
+
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[studio.action] reorder step unexpected exception', {
+      stepId: id,
+      direction,
+      returnFlavorId,
+      message
+    })
+    actionError = `Could not reorder steps: ${message}`
+  }
+
+  if (actionError) {
+    redirect(
+      buildRedirectUrl(
+        'steps',
+        { type: 'error', scope: 'step-reorder', message: actionError },
+        redirectFlavorId
+      )
+    )
+  }
+
+  revalidatePath('/')
+  redirect(
+    buildRedirectUrl(
+      'steps',
+      { type: 'success', scope: 'step-reorder', message: 'Step order updated.' },
+      redirectFlavorId
+    )
+  )
+}
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
