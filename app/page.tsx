@@ -122,7 +122,7 @@ function buildRedirectUrl(view: ViewId, feedback?: StudioFeedback, selectedFlavo
 
 async function signOut() {
   'use server'
-  const supabase = createClient()
+  const supabase = await createClient()
   await supabase.auth.signOut()
   redirect('/login')
 }
@@ -132,7 +132,7 @@ export default async function Home({
 }: {
   searchParams?: Record<string, string | string[] | undefined>
 }) {
-  const supabase = createClient()
+  const supabase = await createClient()
   const {
     data: { user }
   } = await supabase.auth.getUser()
@@ -216,7 +216,7 @@ export default async function Home({
 
   async function createFlavor(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const rawSlug = String(formData.get('slug') ?? '').trim()
     const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const description = String(formData.get('description') ?? '').trim()
@@ -271,7 +271,7 @@ export default async function Home({
 
   async function updateFlavor(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const id = String(formData.get('id') ?? '').trim()
     const rawSlug = String(formData.get('slug') ?? '').trim()
     const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
@@ -318,7 +318,7 @@ export default async function Home({
 
   async function deleteFlavor(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const id = String(formData.get('id') ?? '').trim()
     if (!id) {
       console.error('[studio.action] delete flavor validation failed: missing flavor id')
@@ -412,73 +412,74 @@ export default async function Home({
       )
     }
 
-    const newFlavorId = insertedFlavor.id
+      const newFlavorId = insertedFlavor.id
 
-    const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
+      const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
 
-    if (relatedSteps.length) {
-      const stepPayloads = relatedSteps.map((step, index) => ({
-        [stepFlavorKey]: newFlavorId,
-        created_by_user_id: profile.id,
-        modified_by_user_id: profile.id,
-        ...(stepOrderKey in step && { [stepOrderKey]: index + 1 }),
-        ...(stepTemperatureKey in step && { [stepTemperatureKey]: asNumber(step[stepTemperatureKey]) }),
-        ...(stepInputTypeKey in step && { [stepInputTypeKey]: asNumber(step[stepInputTypeKey]) }),
-        ...(stepOutputTypeKey in step && { [stepOutputTypeKey]: asNumber(step[stepOutputTypeKey]) }),
-        ...(stepModelKey in step && { [stepModelKey]: asNumber(step[stepModelKey]) }),
-        ...(stepSystemPromptKey in step && { [stepSystemPromptKey]: step[stepSystemPromptKey] ?? null }),
-        ...(stepUserPromptKey in step && { [stepUserPromptKey]: step[stepUserPromptKey] ?? null }),
-        ...(stepBodyKey in step && { [stepBodyKey]: step[stepBodyKey] ?? null })
-      }))
+      if (relatedSteps.length) {
+        const stepPayloads = relatedSteps.map((step, index) => ({
+          [stepFlavorKey]: newFlavorId,
+          created_by_user_id: profile.id,
+          modified_by_user_id: profile.id,
+          ...(stepOrderKey in step && { [stepOrderKey]: index + 1 }),
+          ...(stepTemperatureKey in step && { [stepTemperatureKey]: asNumber(step[stepTemperatureKey]) }),
+          ...(stepInputTypeKey in step && { [stepInputTypeKey]: asNumber(step[stepInputTypeKey]) }),
+          ...(stepOutputTypeKey in step && { [stepOutputTypeKey]: asNumber(step[stepOutputTypeKey]) }),
+          ...(stepModelKey in step && { [stepModelKey]: asNumber(step[stepModelKey]) }),
+          ...(stepTitleKey in step && { [stepTitleKey]: asNumber(step[stepTitleKey]) }),
+          ...(stepSystemPromptKey in step && { [stepSystemPromptKey]: step[stepSystemPromptKey] ?? null }),
+          ...(stepUserPromptKey in step && { [stepUserPromptKey]: step[stepUserPromptKey] ?? null }),
+          ...(stepBodyKey in step && { [stepBodyKey]: step[stepBodyKey] ?? null })
+        }))
 
-      const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+        const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
 
-      if (insertStepsError) {
-        await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
+        if (insertStepsError) {
+          await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
 
-        redirect(
-          buildRedirectUrl(
-            'flavors',
-            {
-              type: 'error',
-              scope: 'flavor-duplicate',
-              message: insertStepsError.message
-            },
-            id
+          redirect(
+            buildRedirectUrl(
+              'flavors',
+              {
+                type: 'error',
+                scope: 'flavor-duplicate',
+                message: insertStepsError.message
+              },
+              id
+            )
           )
-        )
+        }
       }
+
+      revalidatePath('/')
+
+      redirect(
+        buildRedirectUrl(
+          'flavors',
+          { type: 'success', scope: 'flavor-duplicate', message: 'Flavor duplicated successfully.' },
+          newFlavorId
+        )
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+
+      redirect(
+        buildRedirectUrl(
+          'flavors',
+          {
+            type: 'error',
+            scope: 'flavor-duplicate',
+            message
+          },
+          id
+        )
+      )
     }
-
-    revalidatePath('/')
-
-    redirect(
-      buildRedirectUrl(
-        'flavors',
-        { type: 'success', scope: 'flavor-duplicate', message: 'Flavor duplicated successfully.' },
-        newFlavorId
-      )
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-
-    redirect(
-      buildRedirectUrl(
-        'flavors',
-        {
-          type: 'error',
-          scope: 'flavor-duplicate',
-          message
-        },
-        id
-      )
-    )
   }
-}
-
+  
   async function createStep(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const flavorId = String(formData.get('flavor_id') ?? '').trim()
     if (!flavorId || !profile?.id) {
       console.error('[studio.action] create step validation failed', { flavorId, hasProfile: Boolean(profile?.id) })
@@ -539,7 +540,7 @@ export default async function Home({
 
   async function updateStep(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const id = String(formData.get('id') ?? '').trim()
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
     if (!id || !profile?.id) {
@@ -598,7 +599,7 @@ export default async function Home({
 
   async function deleteStep(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const id = String(formData.get('id') ?? '').trim()
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
     if (!id) {
@@ -631,7 +632,7 @@ export default async function Home({
 
   async function reorderStep(formData: FormData) {
     'use server'
-    const supabase = createClient()
+    const supabase = await createClient()
     const id = String(formData.get('id') ?? '').trim()
     const direction = String(formData.get('direction') ?? '').trim()
     const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
