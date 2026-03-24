@@ -2,7 +2,25 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 import { createClient } from '@/lib/supabase/server'
-import { buildRedirectUrl } from '@/lib/action-utils'
+
+function buildRedirectUrl(
+  section: string,
+  feedback: { type: 'success' | 'error'; scope: string; message: string },
+  selectedId?: string
+) {
+  const params = new URLSearchParams()
+
+  params.set('section', section)
+  params.set('feedbackType', feedback.type)
+  params.set('feedbackScope', feedback.scope)
+  params.set('feedbackMessage', feedback.message)
+
+  if (selectedId) {
+    params.set('selectedFlavorId', selectedId)
+  }
+
+  return `/?${params.toString()}`
+}
 
 import {
   getFlavorId,
