@@ -1,55 +1,111 @@
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-export async function POST(request: Request) {
-  const payload = await request.json()
-  const endpoint = process.env.HUMOR_PROJECT_REST_API_URL
+const API_BASE = 'https://api.almostcrackd.ai'
 
-  if (!endpoint) {
+function normalizeGeneratedCaptions(payload: unknown): string[] {
+  if (Array.isArray(payload)) {
+    return payload
+      .map((item) => {
+        if (typeof item === 'string') return item.trim()
+
+        if (item && typeof item === 'object') {
+          const row = item as Record<string, unknown>
+          const content = typeof row.content === 'string' ? row.content : null
+          const caption = typeof row.caption === 'string' ? row.caption : null
+          return (content ?? caption ?? '').trim()
+        }
+
+        return ''
+      })
+      .filter(Boolean)
+  }
+
+  if (payload && typeof payload === 'object' && 'captions' in payload) {
+    return normalizeGeneratedCaptions((payload as { captions?: unknown }).captions)
+  }
+
+  return []
+}
+
+export async function POST(request: Request) {
+  const cookieStore = await cookies()
+  const accessToken = cookieStore.get('sb-access-token')?.value
+
+  if (!accessToken) {
     return NextResponse.json(
-      {
-        errorText:
-          'HUMOR_PROJECT_REST_API_URL is not configured. Point it at the Assignment 5-compatible caption test endpoint to enable live flavor testing.'
-      },
-      { status: 500 }
+      { errorText: 'Not signed in. Missing sb-access-token cookie.' },
+      { status: 401 }
+    )
+  }
+
+  const body = await request.json()
+  const imageId = typeof body?.imageId === 'string' ? body.imageId.trim() : ''
+  const imageUrl = typeof body?.imageUrl === 'string' ? body.imageUrl.trim() : ''
+  const flavorId = typeof body?.flavorId === 'string' ? body.flavorId.trim() : ''
+
+  if (!imageId) {
+    return NextResponse.json(
+      { errorText: 'Missing imageId.' },
+      { status: 400 }
     )
   }
 
   try {
-    const upstream = await fetch(endpoint, {
+    const upstream = await fetch(`${API_BASE}/pipeline/generate-captions`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json'
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ imageId }),
       cache: 'no-store'
     })
 
-    const contentType = upstream.headers.get('content-type') || ''
     const responseText = await upstream.text()
+    let parsed: unknown = null
 
-    return NextResponse.json(
-      {
-        upstreamStatus: upstream.status,
-        upstreamStatusText: upstream.statusText,
-        upstreamContentType: contentType,
-        parsed: contentType.includes('application/json')
-          ? (() => {
-              try {
-                return JSON.parse(responseText)
-              } catch {
-                return null
-              }
-            })()
-          : null,
-        rawText: responseText
-      },
-      { status: 200 }
-    )
+    try {
+      parsed = responseText ? JSON.parse(responseText) : null
+    } catch {
+      parsed = { rawText: responseText }
+    }
+
+    if (!upstream.ok) {
+      return NextResponse.json(
+        {
+          errorText:
+            typeof parsed === 'object' && parsed && 'error' in parsed
+              ? String((parsed as Record<string, unknown>).error)
+              : responseText || `Upstream failed with ${upstream.status}`,
+          upstreamStatus: upstream.status,
+          upstreamStatusText: upstream.statusText,
+          rawText: responseText
+        },
+        { status: upstream.status }
+      )
+    }
+
+    const captionTexts = normalizeGeneratedCaptions(parsed)
+
+    return NextResponse.json({
+      flavorId,
+      imageId,
+      imageUrl,
+      captions: captionTexts.map((text, index) => ({
+        id: `generated-${index + 1}`,
+        caption: text,
+        content: text,
+        image_url: imageUrl,
+        flavor_id: flavorId,
+        created_at: new Date().toISOString()
+      })),
+      rawUpstream: parsed
+    })
   } catch (error) {
     return NextResponse.json(
       {
-        errorText: error instanceof Error ? error.message : 'Unknown upstream fetch error'
+        errorText: error instanceof Error ? error.message : 'Unexpected server error.'
       },
       { status: 500 }
     )
