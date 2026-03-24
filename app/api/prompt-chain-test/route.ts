@@ -41,18 +41,36 @@ export async function POST(request: Request) {
   } = await supabase.auth.getSession()
 
   if (sessionError) {
+    console.error('[prompt-chain-test] getSession failed', sessionError)
     return NextResponse.json(
       { errorText: `Could not read auth session: ${sessionError.message}` },
       { status: 401 }
     )
   }
 
+  const {
+    data: { user },
+    error: userError
+  } = await supabase.auth.getUser()
+
+  if (userError) {
+    console.error('[prompt-chain-test] getUser failed', userError)
+    return NextResponse.json(
+      { errorText: `Could not read authenticated user: ${userError.message}` },
+      { status: 401 }
+    )
+  }
+
   const accessToken = session?.access_token
-  const userId = session?.user?.id
+  const userId = user?.id
 
   if (!accessToken || !userId) {
+    console.error('[prompt-chain-test] missing auth pieces', {
+      hasAccessToken: Boolean(accessToken),
+      hasUserId: Boolean(userId)
+    })
     return NextResponse.json(
-      { errorText: 'Not signed in. No Supabase access token found in the current session.' },
+      { errorText: 'Not signed in. Missing access token or authenticated user.' },
       { status: 401 }
     )
   }
@@ -93,6 +111,12 @@ export async function POST(request: Request) {
     }
 
     if (!upstream.ok) {
+      console.error('[prompt-chain-test] upstream failed', {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        parsed
+      })
+
       return NextResponse.json(
         {
           errorText:
@@ -110,6 +134,7 @@ export async function POST(request: Request) {
     const captionTexts = normalizeGeneratedCaptions(parsed)
 
     if (!captionTexts.length) {
+      console.error('[prompt-chain-test] no recognizable captions', { parsed })
       return NextResponse.json(
         {
           errorText: 'Upstream succeeded but returned no recognizable captions.',
@@ -133,6 +158,11 @@ export async function POST(request: Request) {
       .select('id, content, humor_flavor_id, image_id')
 
     if (insertError) {
+      console.error('[prompt-chain-test] insert captions failed', {
+        insertError,
+        captionRows
+      })
+
       return NextResponse.json(
         {
           errorText: `Captions were generated but could not be saved: ${insertError.message}`,
@@ -142,6 +172,12 @@ export async function POST(request: Request) {
         { status: 500 }
       )
     }
+
+    console.info('[prompt-chain-test] success', {
+      savedCount: insertedRows?.length ?? 0,
+      flavorId,
+      imageId
+    })
 
     return NextResponse.json({
       flavorId: String(flavorId),
@@ -160,6 +196,7 @@ export async function POST(request: Request) {
       rawUpstream: parsed
     })
   } catch (error) {
+    console.error('[prompt-chain-test] unexpected exception', error)
     return NextResponse.json(
       {
         errorText: error instanceof Error ? error.message : 'Unexpected server error.'
