@@ -382,11 +382,11 @@ export function PromptChainStudioSection({
                       <span className="font-medium">Slug</span>
                       <input name="slug" required className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="e.g. dry-observational" />
                     </label>
-                    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Rows in <code>humor_flavors</code> use <code>slug</code> and <code>description</code> instead of a dedicated name column.</div>
+                    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Rows in <code>humor_flavors</code> use <code>slug</code> and optional <code>description</code> for flavor metadata.</div>
                   </div>
                   <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Description</span>
-                    <textarea name="description" required rows={4} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="Describe tone, style, or workflow intent." />
+                    <span className="font-medium">Description (optional)</span>
+                    <textarea name="description" rows={4} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="Describe tone, style, or workflow intent." />
                   </label>
                   <button type="submit" className="w-fit rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white">Create flavor</button>
                 </form>
@@ -416,8 +416,8 @@ export function PromptChainStudioSection({
                         <input name="slug" required defaultValue={getFlavorSlug(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
                       </label>
                       <label className="grid gap-2 text-sm">
-                        <span className="font-medium">Description</span>
-                        <textarea name="description" required rows={4} defaultValue={getFlavorDescription(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
+                        <span className="font-medium">Description (optional)</span>
+                        <textarea name="description" rows={4} defaultValue={getFlavorDescription(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
                       </label>
                       <button type="submit" className="w-fit rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white">Save flavor changes</button>
                     </form>
