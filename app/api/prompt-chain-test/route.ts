@@ -24,7 +24,6 @@ function normalizeGeneratedCaptions(payload: unknown): string[] {
 
   if (payload && typeof payload === 'object') {
     const obj = payload as Record<string, unknown>
-
     if (Array.isArray(obj.captions)) return normalizeGeneratedCaptions(obj.captions)
     if (Array.isArray(obj.data)) return normalizeGeneratedCaptions(obj.data)
     if (Array.isArray(obj.results)) return normalizeGeneratedCaptions(obj.results)
@@ -61,20 +60,15 @@ export async function POST(request: Request) {
   const body = await request.json()
   const imageId = typeof body?.imageId === 'string' ? body.imageId.trim() : ''
   const imageUrl = typeof body?.imageUrl === 'string' ? body.imageUrl.trim() : ''
-  const flavorId = typeof body?.flavorId === 'string' ? body.flavorId.trim() : ''
+  const flavorIdRaw = typeof body?.flavorId === 'string' ? body.flavorId.trim() : ''
+  const flavorId = Number(flavorIdRaw)
 
   if (!imageId) {
-    return NextResponse.json(
-      { errorText: 'Missing imageId.' },
-      { status: 400 }
-    )
+    return NextResponse.json({ errorText: 'Missing imageId.' }, { status: 400 })
   }
 
-  if (!flavorId) {
-    return NextResponse.json(
-      { errorText: 'Missing flavorId.' },
-      { status: 400 }
-    )
+  if (!flavorIdRaw || Number.isNaN(flavorId)) {
+    return NextResponse.json({ errorText: 'Missing or invalid flavorId.' }, { status: 400 })
   }
 
   try {
@@ -107,7 +101,7 @@ export async function POST(request: Request) {
               : responseText || `Upstream failed with ${upstream.status}`,
           upstreamStatus: upstream.status,
           upstreamStatusText: upstream.statusText,
-          rawText: responseText
+          rawUpstream: parsed
         },
         { status: upstream.status }
       )
@@ -115,44 +109,55 @@ export async function POST(request: Request) {
 
     const captionTexts = normalizeGeneratedCaptions(parsed)
 
+    if (!captionTexts.length) {
+      return NextResponse.json(
+        {
+          errorText: 'Upstream succeeded but returned no recognizable captions.',
+          rawUpstream: parsed
+        },
+        { status: 200 }
+      )
+    }
+
     const captionRows = captionTexts.map((text) => ({
       content: text,
       image_id: imageId,
-      humor_flavor_id: Number(flavorId),
+      humor_flavor_id: flavorId,
       created_by_user_id: userId,
       modified_by_user_id: userId
     }))
 
-    if (captionRows.length) {
-      const { error: insertError } = await supabase
-        .from('captions')
-        .insert(captionRows)
+    const { data: insertedRows, error: insertError } = await supabase
+      .from('captions')
+      .insert(captionRows)
+      .select('id, content, humor_flavor_id, image_id')
 
-      if (insertError) {
-        return NextResponse.json(
-          {
-            errorText: `Captions were generated but could not be saved: ${insertError.message}`,
-            rawUpstream: parsed
-          },
-          { status: 500 }
-        )
-      }
+    if (insertError) {
+      return NextResponse.json(
+        {
+          errorText: `Captions were generated but could not be saved: ${insertError.message}`,
+          rawUpstream: parsed,
+          attemptedRows: captionRows
+        },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({
-      flavorId,
+      flavorId: String(flavorId),
       imageId,
       imageUrl,
+      savedCount: insertedRows?.length ?? 0,
+      savedRows: insertedRows ?? [],
       captions: captionTexts.map((text, index) => ({
         id: `generated-${index + 1}`,
         caption: text,
         content: text,
         image_url: imageUrl,
-        flavor_id: flavorId,
+        flavor_id: String(flavorId),
         created_at: new Date().toISOString()
       })),
-      rawUpstream: parsed,
-      savedCount: captionRows.length
+      rawUpstream: parsed
     })
   } catch (error) {
     return NextResponse.json(
