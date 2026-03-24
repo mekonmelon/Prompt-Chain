@@ -517,65 +517,118 @@ export default async function Home({
   }
 }
   
-  async function createStep(formData: FormData) {
-    'use server'
-    const supabase = await createClient()
-    const flavorId = String(formData.get('flavor_id') ?? '').trim()
-    if (!flavorId || !profile?.id) {
-      console.error('[studio.action] create step validation failed', { flavorId, hasProfile: Boolean(profile?.id) })
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: 'Create step requires a selected flavor.' }, flavorId))
+ async function createStep(formData: FormData) {
+  'use server'
+
+  const supabase = await createClient()
+  const flavorId = String(formData.get('flavor_id') ?? '').trim()
+
+  if (!flavorId || !profile?.id) {
+    console.error('[studio.action] create step validation failed', { flavorId, hasProfile: Boolean(profile?.id) })
+    redirect(
+      buildRedirectUrl(
+        'steps',
+        { type: 'error', scope: 'step-create', message: 'Create step requires a selected flavor.' },
+        flavorId
+      )
+    )
+  }
+
+  const inputType = buildOptionalInteger(formData.get('input_type'))
+  const outputType = buildOptionalInteger(formData.get('output_type'))
+  const modelId = buildOptionalInteger(formData.get('model_link'))
+  const stepType = buildOptionalInteger(formData.get('step_title'))
+  const temperature = buildOptionalFloat(formData.get('temperature'))
+
+  const validationErrors = [
+    inputType.error,
+    outputType.error,
+    modelId.error,
+    stepType.error,
+    temperature.error
+  ].filter(Boolean)
+
+  if (validationErrors.length) {
+    console.error('[studio.action] create step validation failed', { flavorId, issues: validationErrors })
+    redirect(
+      buildRedirectUrl(
+        'steps',
+        { type: 'error', scope: 'step-create', message: validationErrors.join(' ') },
+        flavorId
+      )
+    )
+  }
+
+  // ✅ fetch existing steps inside the action instead of using the page-level `steps`
+  const { data: existingSteps, error: existingStepsError } = await supabase
+    .from(TABLES.steps)
+    .select('*')
+    .eq(stepFlavorKey, flavorId)
+
+  if (existingStepsError) {
+    console.error('[studio.action] create step fetch existing steps failed', {
+      flavorId,
+      message: existingStepsError.message,
+      code: existingStepsError.code
+    })
+    redirect(
+      buildRedirectUrl(
+        'steps',
+        { type: 'error', scope: 'step-create', message: `Could not load existing steps: ${existingStepsError.message}` },
+        flavorId
+      )
+    )
+  }
+
+  const currentSteps = sortSteps((existingSteps ?? []) as GenericRow[])
+  const nextOrder = (currentSteps.at(-1) ? getStepOrder(currentSteps.at(-1) as GenericRow) : 0) + 1
+
+  let actionError: string | null = null
+
+  try {
+    const { error } = await supabase.from(TABLES.steps).insert({
+      [stepFlavorKey]: flavorId,
+      [stepOrderKey]: nextOrder,
+      [stepTitleKey]: stepType.value,
+      [stepBodyKey]: buildOptionalString(formData.get('step_body')),
+      [stepSystemPromptKey]: buildOptionalString(formData.get('system_prompt')),
+      [stepUserPromptKey]: buildOptionalString(formData.get('user_prompt')),
+      [stepInputTypeKey]: inputType.value,
+      [stepOutputTypeKey]: outputType.value,
+      [stepTemperatureKey]: temperature.value,
+      [stepModelKey]: modelId.value,
+      created_by_user_id: profile.id,
+      modified_by_user_id: profile.id
+    })
+
+    if (error) {
+      console.error('[studio.action] create step db error', { flavorId, message: error.message, code: error.code })
+      actionError = `Could not create step: ${error.message}`
+    } else {
+      console.info('[studio.action] create step success', { flavorId, profileId: profile.id })
+    }
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'digest' in error &&
+      typeof (error as { digest?: unknown }).digest === 'string' &&
+      (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+    ) {
+      throw error
     }
 
-    const currentSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
-    const nextOrder = (currentSteps.at(-1) ? getStepOrder(currentSteps.at(-1) as GenericRow) : 0) + 1
-    const inputType = buildOptionalInteger(formData.get('input_type'))
-    const outputType = buildOptionalInteger(formData.get('output_type'))
-    const modelId = buildOptionalInteger(formData.get('model_link'))
-    const stepType = buildOptionalInteger(formData.get('step_title'))
-    const temperature = buildOptionalFloat(formData.get('temperature'))
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[studio.action] create step unexpected exception', { flavorId, message })
+    actionError = `Could not create step: ${message}`
+  }
 
-    const validationErrors = [inputType.error, outputType.error, modelId.error, stepType.error, temperature.error].filter(Boolean)
-    if (validationErrors.length) {
-      console.error('[studio.action] create step validation failed', { flavorId, issues: validationErrors })
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: validationErrors.join(' ') }, flavorId))
-    }
+  if (actionError) {
+    redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: actionError }, flavorId))
+  }
 
-    let actionError: string | null = null
-
-    try {
-      const { error } = await supabase.from(TABLES.steps).insert({
-        [stepFlavorKey]: flavorId,
-        [stepOrderKey]: nextOrder,
-        [stepTitleKey]: stepType.value,
-        [stepBodyKey]: buildOptionalString(formData.get('step_body')),
-        [stepSystemPromptKey]: buildOptionalString(formData.get('system_prompt')),
-        [stepUserPromptKey]: buildOptionalString(formData.get('user_prompt')),
-        [stepInputTypeKey]: inputType.value,
-        [stepOutputTypeKey]: outputType.value,
-        [stepTemperatureKey]: temperature.value,
-        [stepModelKey]: modelId.value,
-        created_by_user_id: profile.id,
-        modified_by_user_id: profile.id
-      })
-
-      if (error) {
-        console.error('[studio.action] create step db error', { flavorId, message: error.message, code: error.code })
-        actionError = `Could not create step: ${error.message}`
-      } else {
-        console.info('[studio.action] create step success', { flavorId, profileId: profile.id })
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      console.error('[studio.action] create step unexpected exception', { flavorId, message })
-      actionError = `Could not create step: ${message}`
-    }
-
-    if (actionError) {
-      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: actionError }, flavorId))
-    }
-
-    revalidatePath('/')
-    redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-create', message: 'Step created.' }, flavorId))
+  revalidatePath('/')
+  redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-create', message: 'Step created.' }, flavorId))
   }
 
   async function updateStep(formData: FormData) {
