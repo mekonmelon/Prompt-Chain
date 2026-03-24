@@ -143,7 +143,8 @@ export function PromptChainStudioSection({
   const [testError, setTestError] = useState<string | null>(null)
   const [testPayload, setTestPayload] = useState<string>('')
   const [generatedCaptions, setGeneratedCaptions] = useState<ReturnType<typeof normalizeApiCaptions>>([])
-
+  const [testResponseRaw, setTestResponseRaw] = useState<string>('')
+  
   const flavorUpdatedKey = useMemo(() => pickFirstKey(flavors, FLAVOR_UPDATED_KEYS), [flavors])
   const flavorActiveKey = useMemo(() => pickFirstKey(flavors, FLAVOR_ACTIVE_KEYS), [flavors])
 
@@ -184,49 +185,60 @@ export function PromptChainStudioSection({
   }, [activeFlavorId, mixes])
 
   const handleRunTest = async () => {
-    setIsRunningTest(true)
-    setTestError(null)
-    setGeneratedCaptions([])
+  setIsRunningTest(true)
+  setTestError(null)
+  setGeneratedCaptions([])
+  setTestResponseRaw('')
+
+  try {
+    const payload = {
+      flavorId: activeFlavorId,
+      imageId: testImageId,
+      imageUrl: imageById.get(testImageId) ?? '',
+      imageSource: 'images'
+    }
+
+    setTestPayload(JSON.stringify(payload, null, 2))
+
+    const response = await fetch('/api/prompt-chain-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    const rawText = await response.text()
+    setTestResponseRaw(rawText)
+
+    let parsed: unknown = null
 
     try {
-      const payload = {
-        flavorId: activeFlavorId,
-        imageId: testImageId,
-        imageUrl: imageById.get(testImageId) ?? '',
-        imageSource: 'images'
-      }
-
-      setTestPayload(JSON.stringify(payload, null, 2))
-
-      const response = await fetch('/api/prompt-chain-test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-
-      const rawText = await response.text()
-      let parsed: unknown = null
-
-      try {
-        parsed = rawText ? JSON.parse(rawText) : null
-      } catch {
-        parsed = { rawText }
-      }
-
-      if (!response.ok) {
-        const errorText = typeof parsed === 'object' && parsed && 'errorText' in parsed ? asText((parsed as Record<string, unknown>).errorText) : rawText
-        setTestError(errorText || 'Prompt-chain test failed.')
-        return
-      }
-
-      const normalized = normalizeApiCaptions(parsed)
-      setGeneratedCaptions(normalized)
-    } catch (error) {
-      setTestError(error instanceof Error ? error.message : 'Prompt-chain test failed before the API responded.')
-    } finally {
-      setIsRunningTest(false)
+      parsed = rawText ? JSON.parse(rawText) : null
+    } catch {
+      parsed = { rawText }
     }
+
+    if (!response.ok) {
+      const errorText =
+        typeof parsed === 'object' && parsed && 'errorText' in parsed
+          ? asText((parsed as Record<string, unknown>).errorText)
+          : rawText
+
+      setTestError(errorText || 'Prompt-chain test failed.')
+      return
+    }
+
+    const normalized = normalizeApiCaptions(parsed)
+    setGeneratedCaptions(normalized)
+
+    if (!normalized.length) {
+      setTestError(`API returned success, but no captions were recognized.\n\nRaw response:\n${rawText}`)
+    }
+  } catch (error) {
+    setTestError(error instanceof Error ? error.message : 'Prompt-chain test failed before the API responded.')
+  } finally {
+    setIsRunningTest(false)
   }
+}
 
   return (
     <section className="grid gap-6">
@@ -365,6 +377,12 @@ export function PromptChainStudioSection({
                   <div className="mt-6 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4 text-sm text-[var(--muted-foreground)]">
                     <p className="font-semibold text-[var(--foreground)]">Schema-aware editing rule</p>
                     <p className="mt-2">Only fields already present in the loaded schema are shown as structured inputs. If a field is absent from current rows, the studio intentionally avoids guessing it.</p>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
+                    <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug API response</p>
+                    <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">
+                      {testResponseRaw || 'Run a test to inspect the raw API response.'}
+                    </pre>
                   </div>
                 </article>
               </div>
