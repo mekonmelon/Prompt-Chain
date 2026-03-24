@@ -1,18 +1,19 @@
 export type GenericRow = Record<string, unknown>
 
-export const FLAVOR_NAME_KEYS = ['name', 'flavor_name', 'title'] as const
+export const FLAVOR_NAME_KEYS = ['description', 'slug', 'name', 'flavor_name', 'title'] as const
+export const FLAVOR_SLUG_KEYS = ['slug'] as const
 export const FLAVOR_DESCRIPTION_KEYS = ['description', 'notes', 'summary'] as const
 export const FLAVOR_UPDATED_KEYS = ['modified_datetime_utc', 'updated_at', 'created_datetime_utc'] as const
 export const FLAVOR_ACTIVE_KEYS = ['is_active', 'active', 'enabled'] as const
-export const FLAVOR_RELATION_KEYS = ['flavor_id', 'humor_flavor_id', 'humor_flavor'] as const
-export const STEP_ORDER_KEYS = ['step_order', 'order_index', 'order', 'sequence'] as const
-export const STEP_TITLE_KEYS = ['step_title', 'title', 'step_type', 'name'] as const
-export const STEP_BODY_KEYS = ['step_instructions', 'step_content', 'prompt', 'content', 'instructions'] as const
-export const STEP_SYSTEM_PROMPT_KEYS = ['system_prompt'] as const
-export const STEP_USER_PROMPT_KEYS = ['user_prompt'] as const
-export const STEP_INPUT_TYPE_KEYS = ['input_type'] as const
-export const STEP_OUTPUT_TYPE_KEYS = ['output_type'] as const
-export const STEP_TEMPERATURE_KEYS = ['temperature'] as const
+export const FLAVOR_RELATION_KEYS = ['humor_flavor_id', 'flavor_id', 'humor_flavor'] as const
+export const STEP_ORDER_KEYS = ['order_by', 'step_order', 'order_index', 'order', 'sequence'] as const
+export const STEP_TITLE_KEYS = ['humor_flavor_step_type_id', 'step_title', 'title', 'step_type', 'name'] as const
+export const STEP_BODY_KEYS = ['description', 'step_instructions', 'step_content', 'prompt', 'content', 'instructions'] as const
+export const STEP_SYSTEM_PROMPT_KEYS = ['llm_system_prompt', 'system_prompt'] as const
+export const STEP_USER_PROMPT_KEYS = ['llm_user_prompt', 'user_prompt'] as const
+export const STEP_INPUT_TYPE_KEYS = ['llm_input_type_id', 'input_type'] as const
+export const STEP_OUTPUT_TYPE_KEYS = ['llm_output_type_id', 'output_type'] as const
+export const STEP_TEMPERATURE_KEYS = ['llm_temperature', 'temperature'] as const
 export const STEP_ACTIVE_KEYS = ['is_active', 'active', 'enabled'] as const
 export const STEP_MODEL_KEYS = ['llm_model_id', 'model_id', 'provider_id'] as const
 export const CAPTION_TEXT_KEYS = ['caption_text', 'content', 'text'] as const
@@ -51,6 +52,10 @@ export function pickFirstValue(row: GenericRow | null | undefined, candidates: r
 
 export function getFlavorId(row: GenericRow) {
   return asText(row.id || row.flavor_id || row.humor_flavor_id)
+}
+
+export function getFlavorSlug(row: GenericRow) {
+  return asText(pickFirstValue(row, FLAVOR_SLUG_KEYS))
 }
 
 export function getFlavorName(row: GenericRow) {
@@ -127,4 +132,29 @@ export function normalizeApiCaptions(payload: unknown) {
 
 export function hasStudioAccess(profile: GenericRow | null | undefined) {
   return Boolean(profile?.is_superadmin || profile?.is_matrix_admin)
+}
+
+export function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+export function buildDuplicateSlug(existingSlugs: string[], sourceSlug: string, sourceDescription: string) {
+  const base = slugify(sourceSlug || sourceDescription || 'flavor-copy') || 'flavor-copy'
+  const normalizedExisting = new Set(existingSlugs.filter(Boolean))
+  const initialCandidate = `${base}-copy`
+
+  if (!normalizedExisting.has(initialCandidate)) {
+    return initialCandidate
+  }
+
+  let index = 2
+  while (normalizedExisting.has(`${base}-copy-${index}`)) {
+    index += 1
+  }
+
+  return `${base}-copy-${index}`
 }

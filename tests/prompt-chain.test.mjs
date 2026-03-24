@@ -63,3 +63,8 @@ test('normalizeApiCaptions accepts array and nested payload formats', () => {
   assert.equal(direct[0].imageUrl, 'https://example.com/a.jpg')
   assert.equal(nested[0].caption, 'beta')
 })
+
+test('buildDuplicateSlug appends copy suffixes without collisions', () => {
+  assert.equal(promptChain.buildDuplicateSlug(['dry-observational', 'dry-observational-copy'], 'dry-observational', 'Dry Observational'), 'dry-observational-copy-2')
+  assert.equal(promptChain.buildDuplicateSlug([], '', 'Dry Observational'), 'dry-observational-copy')
+})

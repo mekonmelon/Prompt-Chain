@@ -5,13 +5,12 @@ import { PromptChainStudioSection } from '@/components/sections/prompt-chain-stu
 import {
   asNumber,
   asText,
-  FLAVOR_ACTIVE_KEYS,
-  FLAVOR_DESCRIPTION_KEYS,
-  FLAVOR_NAME_KEYS,
+  buildDuplicateSlug,
   FLAVOR_RELATION_KEYS,
   GenericRow,
+  getFlavorDescription,
   getFlavorId,
-  getFlavorName,
+  getFlavorSlug,
   getRowId,
   getStepFlavorId,
   getStepOrder,
@@ -19,8 +18,8 @@ import {
   moveItem,
   pickFirstKey,
   resequenceRows,
+  slugify,
   sortSteps,
-  STEP_ACTIVE_KEYS,
   STEP_BODY_KEYS,
   STEP_INPUT_TYPE_KEYS,
   STEP_MODEL_KEYS,
@@ -44,6 +43,14 @@ type NavItem = {
   id: ViewId
   label: string
   description: string
+}
+
+type FeedbackType = 'success' | 'error'
+
+type StudioFeedback = {
+  message: string
+  scope: string
+  type: FeedbackType
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -73,6 +80,22 @@ function isView(value: string): value is ViewId {
 function buildOptionalString(value: FormDataEntryValue | null) {
   const text = String(value ?? '').trim()
   return text || null
+}
+
+function buildRedirectUrl(view: ViewId, feedback?: StudioFeedback, selectedFlavorId?: string) {
+  const params = new URLSearchParams({ view })
+
+  if (feedback?.message) {
+    params.set('feedback_message', feedback.message)
+    params.set('feedback_scope', feedback.scope)
+    params.set('feedback_type', feedback.type)
+  }
+
+  if (selectedFlavorId) {
+    params.set('selected_flavor_id', selectedFlavorId)
+  }
+
+  return `/?${params.toString()}`
 }
 
 async function signOut() {
@@ -108,6 +131,13 @@ export default async function Home({
 
   const selectedViewRaw = asText(Array.isArray(searchParams?.view) ? searchParams?.view[0] : searchParams?.view)
   const selectedView: ViewId = isView(selectedViewRaw) ? selectedViewRaw : 'overview'
+  const selectedFlavorId = asText(Array.isArray(searchParams?.selected_flavor_id) ? searchParams?.selected_flavor_id[0] : searchParams?.selected_flavor_id)
+
+  const feedbackMessage = asText(Array.isArray(searchParams?.feedback_message) ? searchParams?.feedback_message[0] : searchParams?.feedback_message)
+  const feedbackScope = asText(Array.isArray(searchParams?.feedback_scope) ? searchParams?.feedback_scope[0] : searchParams?.feedback_scope)
+  const feedbackTypeRaw = asText(Array.isArray(searchParams?.feedback_type) ? searchParams?.feedback_type[0] : searchParams?.feedback_type)
+  const feedbackType: FeedbackType = feedbackTypeRaw === 'success' ? 'success' : 'error'
+  const feedback = feedbackMessage ? { message: feedbackMessage, scope: feedbackScope || 'flavors', type: feedbackType } : null
 
   const fetchTable = async (table: string, options?: { orderBy?: string; ascending?: boolean; limit?: number }): Promise<TableResult> => {
     try {
@@ -151,230 +181,310 @@ export default async function Home({
   const promptChains = promptChainsResult.rows
   const responses = responsesResult.rows
 
-  const flavorNameKey = pickFirstKey(flavors, FLAVOR_NAME_KEYS) ?? 'name'
-  const flavorDescriptionKey = pickFirstKey(flavors, FLAVOR_DESCRIPTION_KEYS)
-  const flavorActiveKey = pickFirstKey(flavors, FLAVOR_ACTIVE_KEYS)
-  const stepRelationKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'flavor_id'
-  const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'step_order'
-  const stepTitleKey = pickFirstKey(steps, STEP_TITLE_KEYS) ?? 'step_title'
-  const stepBodyKey = pickFirstKey(steps, STEP_BODY_KEYS)
-  const stepSystemPromptKey = pickFirstKey(steps, STEP_SYSTEM_PROMPT_KEYS)
-  const stepUserPromptKey = pickFirstKey(steps, STEP_USER_PROMPT_KEYS)
-  const stepInputTypeKey = pickFirstKey(steps, STEP_INPUT_TYPE_KEYS)
-  const stepOutputTypeKey = pickFirstKey(steps, STEP_OUTPUT_TYPE_KEYS)
-  const stepTemperatureKey = pickFirstKey(steps, STEP_TEMPERATURE_KEYS)
-  const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS)
-  const stepActiveKey = pickFirstKey(steps, STEP_ACTIVE_KEYS)
+  const stepTitleKey = pickFirstKey(steps, STEP_TITLE_KEYS) ?? 'humor_flavor_step_type_id'
+  const stepBodyKey = pickFirstKey(steps, STEP_BODY_KEYS) ?? 'description'
+  const stepSystemPromptKey = pickFirstKey(steps, STEP_SYSTEM_PROMPT_KEYS) ?? 'llm_system_prompt'
+  const stepUserPromptKey = pickFirstKey(steps, STEP_USER_PROMPT_KEYS) ?? 'llm_user_prompt'
+  const stepInputTypeKey = pickFirstKey(steps, STEP_INPUT_TYPE_KEYS) ?? 'llm_input_type_id'
+  const stepOutputTypeKey = pickFirstKey(steps, STEP_OUTPUT_TYPE_KEYS) ?? 'llm_output_type_id'
+  const stepTemperatureKey = pickFirstKey(steps, STEP_TEMPERATURE_KEYS) ?? 'llm_temperature'
+  const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS) ?? 'llm_model_id'
 
   async function createFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
-    const name = String(formData.get('name') ?? '').trim()
-    if (!name || !profile?.id) return
+    const description = String(formData.get('description') ?? '').trim()
+    const rawSlug = String(formData.get('slug') ?? '').trim()
+    const slug = slugify(rawSlug)
 
-    const payload: GenericRow = {
-      [flavorNameKey]: name,
-      created_by_user_id: profile.id,
-      modified_by_user_id: profile.id
+    if (!profile?.id) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'You must be signed in as an authorized profile to create a flavor.' }))
     }
 
-    if (flavorDescriptionKey) {
-      payload[flavorDescriptionKey] = buildOptionalString(formData.get('description'))
-    }
-    if (flavorActiveKey) {
-      payload[flavorActiveKey] = Boolean(formData.get('is_active'))
+    if (!description || !slug) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'Create flavor requires both a description and a valid slug.' }))
     }
 
-    await supabase.from(TABLES.flavors).insert(payload)
-    revalidatePath('/')
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.flavors)
+        .insert({
+          description,
+          slug,
+          created_by_user_id: profile.id,
+          modified_by_user_id: profile.id
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: `Could not create flavor: ${error.message}` }))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${description}”.` }, asText(data?.id)))
+    } catch (error) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: error instanceof Error ? `Could not create flavor: ${error.message}` : 'Could not create flavor.' }))
+    }
   }
 
   async function updateFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    const name = String(formData.get('name') ?? '').trim()
-    if (!id || !name || !profile?.id) return
+    const description = String(formData.get('description') ?? '').trim()
+    const slug = slugify(String(formData.get('slug') ?? '').trim())
 
-    const payload: GenericRow = {
-      [flavorNameKey]: name,
-      modified_by_user_id: profile.id
+    if (!id || !profile?.id || !description || !slug) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: 'Update flavor requires an id, description, and valid slug.' }, id))
     }
 
-    if (flavorDescriptionKey) {
-      payload[flavorDescriptionKey] = buildOptionalString(formData.get('description'))
-    }
-    if (flavorActiveKey) {
-      payload[flavorActiveKey] = Boolean(formData.get('is_active'))
-    }
+    try {
+      const { error } = await supabase
+        .from(TABLES.flavors)
+        .update({
+          description,
+          slug,
+          modified_by_user_id: profile.id
+        })
+        .eq('id', id)
 
-    await supabase.from(TABLES.flavors).update(payload).eq('id', id)
-    revalidatePath('/')
+      if (error) {
+        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: `Could not save flavor changes: ${error.message}` }, id))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-update', message: 'Flavor changes saved.' }, id))
+    } catch (error) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: error instanceof Error ? `Could not save flavor changes: ${error.message}` : 'Could not save flavor changes.' }, id))
+    }
   }
 
   async function deleteFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    if (!id) return
+    if (!id) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: 'Delete flavor requires a valid id.' }))
+    }
 
-    await supabase.from(TABLES.flavors).delete().eq('id', id)
-    revalidatePath('/')
+    try {
+      const { error } = await supabase.from(TABLES.flavors).delete().eq('id', id)
+      if (error) {
+        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: `Could not delete flavor: ${error.message}` }))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-delete', message: 'Flavor deleted.' }))
+    } catch (error) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-delete', message: error instanceof Error ? `Could not delete flavor: ${error.message}` : 'Could not delete flavor.' }))
+    }
   }
 
   async function duplicateFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    if (!id || !profile?.id) return
+
+    if (!id || !profile?.id) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: 'Duplicate flavor requires a valid source flavor.' }, id))
+    }
 
     const sourceFlavor = flavors.find((row) => getFlavorId(row) === id)
-    if (!sourceFlavor) return
-
-    const flavorPayload: GenericRow = {
-      [flavorNameKey]: `${getFlavorName(sourceFlavor)} Copy`,
-      created_by_user_id: profile.id,
-      modified_by_user_id: profile.id
+    if (!sourceFlavor) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: 'Source flavor could not be found in the loaded dataset.' }, id))
     }
 
-    if (flavorDescriptionKey && flavorDescriptionKey in sourceFlavor) {
-      flavorPayload[flavorDescriptionKey] = sourceFlavor[flavorDescriptionKey]
-    }
-    if (flavorActiveKey && flavorActiveKey in sourceFlavor) {
-      flavorPayload[flavorActiveKey] = sourceFlavor[flavorActiveKey]
-    }
+    const sourceDescription = getFlavorDescription(sourceFlavor)
+    const sourceSlug = getFlavorSlug(sourceFlavor)
+    const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : `Copy of ${sourceSlug || id}`
+    const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceDescription)
 
-    const { data: insertedFlavor } = await supabase.from(TABLES.flavors).insert(flavorPayload).select('id').single()
-    if (!insertedFlavor?.id) {
-      revalidatePath('/')
-      return
-    }
-
-    const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
-    if (relatedSteps.length) {
-      const stepPayloads = relatedSteps.map((step, index) => {
-        const payload: GenericRow = {
-          [stepRelationKey]: insertedFlavor.id,
-          [stepOrderKey]: index + 1,
+    try {
+      const { data: insertedFlavor, error: insertFlavorError } = await supabase
+        .from(TABLES.flavors)
+        .insert({
+          description: duplicateDescription,
+          slug: duplicateSlug,
           created_by_user_id: profile.id,
           modified_by_user_id: profile.id
-        }
-
-        ;[
-          stepTitleKey,
-          stepBodyKey,
-          stepSystemPromptKey,
-          stepUserPromptKey,
-          stepInputTypeKey,
-          stepOutputTypeKey,
-          stepTemperatureKey,
-          stepModelKey,
-          stepActiveKey
-        ].forEach((key) => {
-          if (key && key in step) payload[key] = step[key]
         })
+        .select('id')
+        .single()
 
-        return payload
-      })
+      if (insertFlavorError || !insertedFlavor?.id) {
+        redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: `Could not duplicate flavor: ${insertFlavorError?.message ?? 'new flavor row was not created.'}` }, id))
+      }
 
-      await supabase.from(TABLES.steps).insert(stepPayloads)
+      const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
+      if (relatedSteps.length) {
+        const stepPayloads = relatedSteps.map((step, index) => ({
+          humor_flavor_id: insertedFlavor.id,
+          llm_temperature: step[stepTemperatureKey] ?? null,
+          order_by: getStepOrder(step) === Number.MAX_SAFE_INTEGER ? index + 1 : getStepOrder(step),
+          llm_input_type_id: step[stepInputTypeKey] ?? null,
+          llm_output_type_id: step[stepOutputTypeKey] ?? null,
+          llm_model_id: step[stepModelKey] ?? null,
+          humor_flavor_step_type_id: step[stepTitleKey] ?? null,
+          llm_system_prompt: step[stepSystemPromptKey] ?? null,
+          llm_user_prompt: step[stepUserPromptKey] ?? null,
+          description: step[stepBodyKey] ?? null,
+          created_by_user_id: profile.id,
+          modified_by_user_id: profile.id
+        }))
+
+        const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+
+        if (insertStepsError) {
+          await supabase.from(TABLES.flavors).delete().eq('id', insertedFlavor.id)
+          redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: `Could not duplicate flavor steps: ${insertStepsError.message}` }, id))
+        }
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-duplicate', message: `Duplicated flavor as “${duplicateDescription}”.` }, insertedFlavor.id))
+    } catch (error) {
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-duplicate', message: error instanceof Error ? `Could not duplicate flavor: ${error.message}` : 'Could not duplicate flavor.' }, id))
     }
-
-    revalidatePath('/')
   }
 
   async function createStep(formData: FormData) {
     'use server'
     const supabase = createClient()
     const flavorId = String(formData.get('flavor_id') ?? '').trim()
-    if (!flavorId || !profile?.id) return
+    if (!flavorId || !profile?.id) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: 'Create step requires a selected flavor.' }, flavorId))
+    }
 
     const currentSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
     const nextOrder = (currentSteps.at(-1) ? getStepOrder(currentSteps.at(-1) as GenericRow) : 0) + 1
 
-    const payload: GenericRow = {
-      [stepRelationKey]: flavorId,
-      [stepOrderKey]: nextOrder,
-      created_by_user_id: profile.id,
-      modified_by_user_id: profile.id
+    try {
+      const { error } = await supabase.from(TABLES.steps).insert({
+        humor_flavor_id: flavorId,
+        order_by: nextOrder,
+        humor_flavor_step_type_id: buildOptionalString(formData.get('step_title')),
+        description: buildOptionalString(formData.get('step_body')),
+        llm_system_prompt: buildOptionalString(formData.get('system_prompt')),
+        llm_user_prompt: buildOptionalString(formData.get('user_prompt')),
+        llm_input_type_id: buildOptionalString(formData.get('input_type')),
+        llm_output_type_id: buildOptionalString(formData.get('output_type')),
+        llm_temperature: asNumber(formData.get('temperature')),
+        llm_model_id: buildOptionalString(formData.get('model_link')),
+        created_by_user_id: profile.id,
+        modified_by_user_id: profile.id
+      })
+
+      if (error) {
+        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: `Could not create step: ${error.message}` }, flavorId))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-create', message: 'Step created.' }, flavorId))
+    } catch (error) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-create', message: error instanceof Error ? `Could not create step: ${error.message}` : 'Could not create step.' }, flavorId))
     }
-
-    payload[stepTitleKey] = buildOptionalString(formData.get('step_title'))
-    if (stepBodyKey) payload[stepBodyKey] = buildOptionalString(formData.get('step_body'))
-    if (stepSystemPromptKey) payload[stepSystemPromptKey] = buildOptionalString(formData.get('system_prompt'))
-    if (stepUserPromptKey) payload[stepUserPromptKey] = buildOptionalString(formData.get('user_prompt'))
-    if (stepInputTypeKey) payload[stepInputTypeKey] = buildOptionalString(formData.get('input_type'))
-    if (stepOutputTypeKey) payload[stepOutputTypeKey] = buildOptionalString(formData.get('output_type'))
-    if (stepTemperatureKey) payload[stepTemperatureKey] = asNumber(formData.get('temperature'))
-    if (stepModelKey) payload[stepModelKey] = buildOptionalString(formData.get('model_link'))
-    if (stepActiveKey) payload[stepActiveKey] = Boolean(formData.get('is_active'))
-
-    await supabase.from(TABLES.steps).insert(payload)
-    revalidatePath('/')
   }
 
   async function updateStep(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    if (!id || !profile?.id) return
-
-    const payload: GenericRow = {
-      modified_by_user_id: profile.id,
-      [stepTitleKey]: buildOptionalString(formData.get('step_title'))
+    const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
+    if (!id || !profile?.id) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: 'Update step requires a valid step id.' }, returnFlavorId))
     }
 
-    const order = asNumber(formData.get('step_order'))
-    if (order !== null) payload[stepOrderKey] = order
-    if (stepBodyKey) payload[stepBodyKey] = buildOptionalString(formData.get('step_body'))
-    if (stepSystemPromptKey) payload[stepSystemPromptKey] = buildOptionalString(formData.get('system_prompt'))
-    if (stepUserPromptKey) payload[stepUserPromptKey] = buildOptionalString(formData.get('user_prompt'))
-    if (stepInputTypeKey) payload[stepInputTypeKey] = buildOptionalString(formData.get('input_type'))
-    if (stepOutputTypeKey) payload[stepOutputTypeKey] = buildOptionalString(formData.get('output_type'))
-    if (stepTemperatureKey) payload[stepTemperatureKey] = asNumber(formData.get('temperature'))
-    if (stepModelKey) payload[stepModelKey] = buildOptionalString(formData.get('model_link'))
-    if (stepActiveKey) payload[stepActiveKey] = Boolean(formData.get('is_active'))
+    try {
+      const payload: GenericRow = {
+        modified_by_user_id: profile.id,
+        humor_flavor_step_type_id: buildOptionalString(formData.get('step_title')),
+        description: buildOptionalString(formData.get('step_body')),
+        llm_system_prompt: buildOptionalString(formData.get('system_prompt')),
+        llm_user_prompt: buildOptionalString(formData.get('user_prompt')),
+        llm_input_type_id: buildOptionalString(formData.get('input_type')),
+        llm_output_type_id: buildOptionalString(formData.get('output_type')),
+        llm_temperature: asNumber(formData.get('temperature')),
+        llm_model_id: buildOptionalString(formData.get('model_link'))
+      }
 
-    await supabase.from(TABLES.steps).update(payload).eq('id', id)
-    revalidatePath('/')
+      const order = asNumber(formData.get('step_order'))
+      if (order !== null) payload.order_by = order
+
+      const { error } = await supabase.from(TABLES.steps).update(payload).eq('id', id)
+      if (error) {
+        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: `Could not save step: ${error.message}` }, returnFlavorId))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-update', message: 'Step saved.' }, returnFlavorId))
+    } catch (error) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-update', message: error instanceof Error ? `Could not save step: ${error.message}` : 'Could not save step.' }, returnFlavorId))
+    }
   }
 
   async function deleteStep(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    if (!id) return
+    const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
+    if (!id) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: 'Delete step requires a valid step id.' }, returnFlavorId))
+    }
 
-    await supabase.from(TABLES.steps).delete().eq('id', id)
-    revalidatePath('/')
-  }
+    try {
+      const { error } = await supabase.from(TABLES.steps).delete().eq('id', id)
+      if (error) {
+        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: `Could not delete step: ${error.message}` }, returnFlavorId))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-delete', message: 'Step deleted.' }, returnFlavorId))
+    } catch (error) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-delete', message: error instanceof Error ? `Could not delete step: ${error.message}` : 'Could not delete step.' }, returnFlavorId))
+    }
 
   async function reorderStep(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
     const direction = String(formData.get('direction') ?? '').trim()
-    if (!id || !profile?.id || !['up', 'down'].includes(direction)) return
+    const returnFlavorId = String(formData.get('return_flavor_id') ?? '').trim()
+
+    if (!id || !profile?.id || !['up', 'down'].includes(direction)) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Move step requires a valid step id and direction.' }, returnFlavorId))
+    }
 
     const target = steps.find((row) => getRowId(row) === id)
-    if (!target) return
+    if (!target) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: 'Could not find the selected step to reorder.' }, returnFlavorId))
+    }
 
-    const flavorId = getStepFlavorId(target)
-    const siblings = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
-    const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
-    const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-    const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), stepOrderKey)
+    try {
+      const flavorId = getStepFlavorId(target)
+      const siblings = sortSteps(steps.filter((row) => getStepFlavorId(row) === flavorId))
+      const currentIndex = siblings.findIndex((row) => getRowId(row) === id)
+      const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+      const reordered = resequenceRows(moveItem(siblings, currentIndex, nextIndex), 'order_by')
 
-    await Promise.all(
-      reordered.map((row) =>
+      const updates = reordered.map((row) =>
         supabase
           .from(TABLES.steps)
-          .update({ [stepOrderKey]: row[stepOrderKey], modified_by_user_id: profile.id })
+          .update({ order_by: row.order_by, modified_by_user_id: profile.id })
           .eq('id', getRowId(row))
       )
-    )
 
-    revalidatePath('/')
+      const results = await Promise.all(updates)
+      const error = results.find((result) => result.error)?.error
+      if (error) {
+        redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: `Could not reorder steps: ${error.message}` }, flavorId || returnFlavorId))
+      }
+
+      revalidatePath('/')
+      redirect(buildRedirectUrl('steps', { type: 'success', scope: 'step-reorder', message: 'Step order updated.' }, flavorId || returnFlavorId))
+    } catch (error) {
+      redirect(buildRedirectUrl('steps', { type: 'error', scope: 'step-reorder', message: error instanceof Error ? `Could not reorder steps: ${error.message}` : 'Could not reorder steps.' }, returnFlavorId))
+    }
   }
 
   return (
@@ -444,8 +554,10 @@ export default async function Home({
               deleteFlavor={deleteFlavor}
               deleteStep={deleteStep}
               duplicateFlavor={duplicateFlavor}
+              feedback={feedback}
               flavors={flavors}
               images={images}
+              initialSelectedFlavorId={selectedFlavorId}
               mixes={mixes}
               promptChains={promptChains}
               reorderStep={reorderStep}

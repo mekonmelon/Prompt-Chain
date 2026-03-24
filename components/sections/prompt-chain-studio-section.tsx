@@ -7,13 +7,12 @@ import {
   CAPTION_TEXT_KEYS,
   extractPromptVariables,
   FLAVOR_ACTIVE_KEYS,
-  FLAVOR_DESCRIPTION_KEYS,
-  FLAVOR_NAME_KEYS,
   FLAVOR_UPDATED_KEYS,
   GenericRow,
   getFlavorDescription,
   getFlavorId,
   getFlavorName,
+  getFlavorSlug,
   getRowId,
   getStepFlavorId,
   getStepOrder,
@@ -36,8 +35,16 @@ import {
 
 type ActionProp = (formData: FormData) => void | Promise<void>
 
+type Feedback = {
+  message: string
+  scope: string
+  type: 'success' | 'error'
+}
+
 type Props = {
   selectedView: string
+  initialSelectedFlavorId?: string
+  feedback?: Feedback | null
   flavors: GenericRow[]
   steps: GenericRow[]
   images: GenericRow[]
@@ -111,6 +118,8 @@ function groupTitle(selectedView: string) {
 
 export function PromptChainStudioSection({
   selectedView,
+  initialSelectedFlavorId,
+  feedback,
   flavors,
   steps,
   images,
@@ -128,15 +137,13 @@ export function PromptChainStudioSection({
   reorderStep
 }: Props) {
   const [query, setQuery] = useState('')
-  const [selectedFlavorId, setSelectedFlavorId] = useState(getFlavorId(flavors[0] ?? {}))
+  const [selectedFlavorId, setSelectedFlavorId] = useState(initialSelectedFlavorId || getFlavorId(flavors[0] ?? {}))
   const [testImageId, setTestImageId] = useState(asText(images[0]?.id))
   const [isRunningTest, setIsRunningTest] = useState(false)
   const [testError, setTestError] = useState<string | null>(null)
   const [testPayload, setTestPayload] = useState<string>('')
   const [generatedCaptions, setGeneratedCaptions] = useState<ReturnType<typeof normalizeApiCaptions>>([])
 
-  const flavorNameKey = useMemo(() => pickFirstKey(flavors, FLAVOR_NAME_KEYS), [flavors])
-  const flavorDescriptionKey = useMemo(() => pickFirstKey(flavors, FLAVOR_DESCRIPTION_KEYS), [flavors])
   const flavorUpdatedKey = useMemo(() => pickFirstKey(flavors, FLAVOR_UPDATED_KEYS), [flavors])
   const flavorActiveKey = useMemo(() => pickFirstKey(flavors, FLAVOR_ACTIVE_KEYS), [flavors])
 
@@ -287,6 +294,12 @@ export function PromptChainStudioSection({
         </aside>
 
         <div className="grid gap-6">
+          {feedback?.message ? (
+            <div className={`rounded-2xl border p-4 text-sm ${feedback.type === 'success' ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-rose-400/30 bg-rose-500/10 text-rose-200'}`}>
+              <p className="font-semibold">{feedback.type === 'success' ? 'Success' : 'Action failed'}</p>
+              <p className="mt-1 whitespace-pre-wrap">{feedback.message}</p>
+            </div>
+          ) : null}
           {selectedView === 'overview' ? (
             <>
               <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -366,24 +379,15 @@ export function PromptChainStudioSection({
                 <form action={createFlavor} className="mt-4 grid gap-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="grid gap-2 text-sm">
-                      <span className="font-medium">Name</span>
-                      <input name="name" required className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder={flavorNameKey ?? 'Detected name field required'} />
+                      <span className="font-medium">Slug</span>
+                      <input name="slug" required className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="e.g. dry-observational" />
                     </label>
-                    {flavorActiveKey ? (
-                      <label className="flex items-center gap-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm">
-                        <input defaultChecked name="is_active" type="checkbox" />
-                        Active flavor
-                      </label>
-                    ) : null}
+                    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Rows in <code>humor_flavors</code> use <code>slug</code> and <code>description</code> instead of a dedicated name column.</div>
                   </div>
-                  {flavorDescriptionKey ? (
-                    <label className="grid gap-2 text-sm">
-                      <span className="font-medium">Description</span>
-                      <textarea name="description" rows={4} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="Describe tone, style, or workflow intent." />
-                    </label>
-                  ) : (
-                    <p className="rounded-2xl border border-dashed border-[var(--panel-border)] bg-[var(--panel-muted)] p-3 text-sm text-[var(--muted-foreground)]">TODO: no flavor description column was detected in loaded rows, so description editing stays disabled until shared types/schema are available.</p>
-                  )}
+                  <label className="grid gap-2 text-sm">
+                    <span className="font-medium">Description</span>
+                    <textarea name="description" required rows={4} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="Describe tone, style, or workflow intent." />
+                  </label>
                   <button type="submit" className="w-fit rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white">Create flavor</button>
                 </form>
               </article>
@@ -394,7 +398,7 @@ export function PromptChainStudioSection({
                     <h3 className="text-lg font-semibold">Flavor detail panel</h3>
                     <p className="text-sm text-[var(--muted-foreground)]">Searchable master/detail editing without flattening the UI into a giant table.</p>
                   </div>
-                  {activeFlavor ? badge(`ID ${activeFlavorId}`) : null}
+                  {activeFlavor ? badge(getFlavorSlug(activeFlavor) || `ID ${activeFlavorId}`) : null}
                 </div>
 
                 {activeFlavor ? (
@@ -402,26 +406,19 @@ export function PromptChainStudioSection({
                     <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
                       <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Last modified</p>
                       <p className="mt-2 text-sm font-semibold">{flavorUpdatedKey ? formatDate(activeFlavor[flavorUpdatedKey]) : 'No update timestamp column detected'}</p>
+                      <p className="mt-2 text-xs text-[var(--muted-foreground)]">Slug: {getFlavorSlug(activeFlavor) || '—'}</p>
                     </div>
 
                     <form action={updateFlavor} className="grid gap-4">
                       <input type="hidden" name="id" value={activeFlavorId} />
                       <label className="grid gap-2 text-sm">
-                        <span className="font-medium">Name</span>
-                        <input name="name" required defaultValue={getFlavorName(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
+                        <span className="font-medium">Slug</span>
+                        <input name="slug" required defaultValue={getFlavorSlug(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
                       </label>
-                      {flavorDescriptionKey ? (
-                        <label className="grid gap-2 text-sm">
-                          <span className="font-medium">Description</span>
-                          <textarea name="description" rows={4} defaultValue={getFlavorDescription(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
-                        </label>
-                      ) : null}
-                      {flavorActiveKey ? (
-                        <label className="flex items-center gap-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm">
-                          <input name="is_active" type="checkbox" defaultChecked={activeFlavor[flavorActiveKey] !== false} />
-                          Active flavor
-                        </label>
-                      ) : null}
+                      <label className="grid gap-2 text-sm">
+                        <span className="font-medium">Description</span>
+                        <textarea name="description" required rows={4} defaultValue={getFlavorDescription(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
+                      </label>
                       <button type="submit" className="w-fit rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white">Save flavor changes</button>
                     </form>
 
@@ -483,11 +480,13 @@ export function PromptChainStudioSection({
                         <div className="flex gap-2">
                           <form action={reorderStep}>
                             <input type="hidden" name="id" value={getRowId(step)} />
+                        <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
                             <input type="hidden" name="direction" value="up" />
                             <button disabled={index === 0} type="submit" className="rounded-full border border-[var(--panel-border)] bg-[var(--panel)] px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Move up</button>
                           </form>
                           <form action={reorderStep}>
                             <input type="hidden" name="id" value={getRowId(step)} />
+                            <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
                             <input type="hidden" name="direction" value="down" />
                             <button disabled={index === activeSteps.length - 1} type="submit" className="rounded-full border border-[var(--panel-border)] bg-[var(--panel)] px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Move down</button>
                           </form>
@@ -496,6 +495,7 @@ export function PromptChainStudioSection({
 
                       <form action={updateStep} className="mt-4 grid gap-3">
                         <input type="hidden" name="id" value={getRowId(step)} />
+                        <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
                         <div className="grid gap-3 md:grid-cols-2">
                           <label className="grid gap-2 text-sm">
                             <span className="font-medium">Step title</span>
@@ -524,6 +524,7 @@ export function PromptChainStudioSection({
                       </form>
                       <form action={deleteStep} className="mt-3">
                         <input type="hidden" name="id" value={getRowId(step)} />
+                        <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
                         <button type="submit" className="rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-300">Delete step</button>
                       </form>
                     </div>
