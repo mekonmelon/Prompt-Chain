@@ -1,6 +1,6 @@
 export type GenericRow = Record<string, unknown>
 
-export const FLAVOR_NAME_KEYS = ['description', 'slug', 'name', 'flavor_name', 'title'] as const
+export const FLAVOR_LABEL_KEYS = ['slug', 'description', 'id'] as const
 export const FLAVOR_SLUG_KEYS = ['slug'] as const
 export const FLAVOR_DESCRIPTION_KEYS = ['description', 'notes', 'summary'] as const
 export const FLAVOR_UPDATED_KEYS = ['modified_datetime_utc', 'updated_at', 'created_datetime_utc'] as const
@@ -58,8 +58,13 @@ export function getFlavorSlug(row: GenericRow) {
   return asText(pickFirstValue(row, FLAVOR_SLUG_KEYS))
 }
 
+export function getFlavorLabel(row: GenericRow) {
+  return asText(pickFirstValue(row, FLAVOR_LABEL_KEYS) ?? row.id)
+}
+
+// Backwards-compatible alias for existing call sites.
 export function getFlavorName(row: GenericRow) {
-  return asText(pickFirstValue(row, FLAVOR_NAME_KEYS) ?? row.id)
+  return getFlavorLabel(row)
 }
 
 export function getFlavorDescription(row: GenericRow) {

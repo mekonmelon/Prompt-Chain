@@ -213,8 +213,8 @@ export default async function Home({
   const stepOutputTypeKey = pickFirstKey(steps, STEP_OUTPUT_TYPE_KEYS) ?? 'llm_output_type_id'
   const stepTemperatureKey = pickFirstKey(steps, STEP_TEMPERATURE_KEYS) ?? 'llm_temperature'
   const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS) ?? 'llm_model_id'
-  const stepFlavorKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'flavor_id'
-  const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'step_order'
+  const stepFlavorKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'humor_flavor_id'
+  const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'order_by'
 
   async function createFlavor(formData: FormData) {
     'use server'
@@ -404,6 +404,11 @@ export default async function Home({
         actionError = `Could not duplicate flavor: ${insertFlavorError?.message ?? 'new flavor row was not created.'}`
       } else {
         insertedFlavorId = asText(insertedFlavor.id)
+        console.info('[studio.action] duplicate flavor insert success', {
+          sourceFlavorId: id,
+          duplicateSlug,
+          insertedFlavorId
+        })
         const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
         if (relatedSteps.length) {
           const stepPayloads = relatedSteps.map((step, index) => {

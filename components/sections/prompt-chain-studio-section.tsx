@@ -11,7 +11,7 @@ import {
   GenericRow,
   getFlavorDescription,
   getFlavorId,
-  getFlavorName,
+  getFlavorLabel,
   getFlavorSlug,
   getRowId,
   getStepFlavorId,
@@ -161,7 +161,7 @@ export function PromptChainStudioSection({
   const filteredFlavors = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return flavors
-    return flavors.filter((row) => [getFlavorName(row), getFlavorDescription(row), getFlavorId(row)].join(' ').toLowerCase().includes(q))
+    return flavors.filter((row) => [getFlavorLabel(row), getFlavorDescription(row), getFlavorId(row)].join(' ').toLowerCase().includes(q))
   }, [flavors, query])
 
   const activeFlavor = useMemo(() => {
@@ -249,7 +249,7 @@ export function PromptChainStudioSection({
             </article>
             <article className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
               <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Recently Updated</p>
-              <p className="mt-2 text-sm font-semibold">{recentFlavor ? getFlavorName(recentFlavor) : 'No flavors loaded'}</p>
+              <p className="mt-2 text-sm font-semibold">{recentFlavor ? getFlavorLabel(recentFlavor) : 'No flavors loaded'}</p>
             </article>
           </div>
 
@@ -281,7 +281,7 @@ export function PromptChainStudioSection({
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold">{getFlavorName(flavor)}</p>
+                        <p className="text-sm font-semibold">{getFlavorLabel(flavor)}</p>
                         <p className="mt-1 text-xs text-[var(--muted-foreground)] line-clamp-2">{getFlavorDescription(flavor) || 'No description column detected for this flavor row.'}</p>
                       </div>
                       {flavorActiveKey ? badge(getBooleanState(flavor, [flavorActiveKey]), flavor[flavorActiveKey] === false ? 'default' : 'success') : null}
@@ -315,7 +315,7 @@ export function PromptChainStudioSection({
 
                 <article className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-6 shadow-sm">
                   <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Selected flavor</p>
-                  <h3 className="mt-3 text-2xl font-bold">{activeFlavor ? getFlavorName(activeFlavor) : 'No flavor selected'}</h3>
+                  <h3 className="mt-3 text-2xl font-bold">{activeFlavor ? getFlavorLabel(activeFlavor) : 'No flavor selected'}</h3>
                   <p className="mt-3 text-sm leading-7 text-[var(--muted-foreground)]">{activeFlavor ? getFlavorDescription(activeFlavor) || 'No description field detected for the selected flavor.' : 'Choose a flavor from the library to inspect its step chain.'}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {badge(`${activeSteps.length} ordered steps`, 'accent')}
@@ -409,7 +409,7 @@ export function PromptChainStudioSection({
                       <p className="mt-2 text-xs text-[var(--muted-foreground)]">Slug: {getFlavorSlug(activeFlavor) || '—'}</p>
                     </div>
 
-                    <form action={updateFlavor} className="grid gap-4">
+                    <form key={activeFlavorId} action={updateFlavor} className="grid gap-4">
                       <input type="hidden" name="id" value={activeFlavorId} />
                       <label className="grid gap-2 text-sm">
                         <span className="font-medium">Name</span>
@@ -458,7 +458,7 @@ export function PromptChainStudioSection({
                     <h3 className="text-lg font-semibold">Ordered step editor</h3>
                     <p className="text-sm text-[var(--muted-foreground)]">Move steps up/down for stable ordering without introducing a brittle drag/drop dependency.</p>
                   </div>
-                  {activeFlavor ? badge(getFlavorName(activeFlavor), 'accent') : null}
+                  {activeFlavor ? badge(getFlavorLabel(activeFlavor), 'accent') : null}
                 </div>
 
                 <div className="mt-4 space-y-4">
@@ -575,7 +575,7 @@ export function PromptChainStudioSection({
                   <label className="grid gap-2 text-sm">
                     <span className="font-medium">Selected flavor</span>
                     <select value={activeFlavorId} onChange={(event) => setSelectedFlavorId(event.target.value)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2">
-                      {flavors.map((flavor) => <option key={getFlavorId(flavor)} value={getFlavorId(flavor)}>{getFlavorName(flavor)}</option>)}
+                      {flavors.map((flavor) => <option key={getFlavorId(flavor)} value={getFlavorId(flavor)}>{getFlavorLabel(flavor)}</option>)}
                     </select>
                   </label>
                   <label className="grid gap-2 text-sm">
@@ -631,7 +631,7 @@ export function PromptChainStudioSection({
                     <h3 className="text-lg font-semibold">Recent captions for selected flavor</h3>
                     <p className="text-sm text-[var(--muted-foreground)]">Read-only inspection view tied to the currently selected flavor where caption flavor fields were detectable.</p>
                   </div>
-                  {activeFlavor ? badge(getFlavorName(activeFlavor), 'accent') : null}
+                  {activeFlavor ? badge(getFlavorLabel(activeFlavor), 'accent') : null}
                 </div>
                 <div className="mt-4 space-y-3">
                   {recentCaptions.length ? recentCaptions.map((caption) => {
