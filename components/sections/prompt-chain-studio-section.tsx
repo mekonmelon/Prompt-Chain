@@ -1,6 +1,7 @@
 'use client'
-  
+
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   asText,
   CAPTION_FLAVOR_KEYS,
@@ -136,15 +137,16 @@ export function PromptChainStudioSection({
   deleteStep,
   reorderStep
 }: Props) {
+  const router = useRouter()
   const [query, setQuery] = useState('')
   const [selectedFlavorId, setSelectedFlavorId] = useState(initialSelectedFlavorId || getFlavorId(flavors[0] ?? {}))
   const [testImageId, setTestImageId] = useState(asText(images[0]?.id))
   const [isRunningTest, setIsRunningTest] = useState(false)
   const [testError, setTestError] = useState<string | null>(null)
   const [testPayload, setTestPayload] = useState<string>('')
-  const [generatedCaptions, setGeneratedCaptions] = useState<ReturnType<typeof normalizeApiCaptions>>([])
   const [testResponseRaw, setTestResponseRaw] = useState<string>('')
-  
+  const [generatedCaptions, setGeneratedCaptions] = useState<ReturnType<typeof normalizeApiCaptions>>([])
+
   const flavorUpdatedKey = useMemo(() => pickFirstKey(flavors, FLAVOR_UPDATED_KEYS), [flavors])
   const flavorActiveKey = useMemo(() => pickFirstKey(flavors, FLAVOR_ACTIVE_KEYS), [flavors])
 
@@ -185,60 +187,77 @@ export function PromptChainStudioSection({
   }, [activeFlavorId, mixes])
 
   const handleRunTest = async () => {
-  setIsRunningTest(true)
-  setTestError(null)
-  setGeneratedCaptions([])
-  setTestResponseRaw('')
-
-  try {
-    const payload = {
-      flavorId: activeFlavorId,
-      imageId: testImageId,
-      imageUrl: imageById.get(testImageId) ?? '',
-      imageSource: 'images'
-    }
-
-    setTestPayload(JSON.stringify(payload, null, 2))
-
-    const response = await fetch('/api/prompt-chain-test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-
-    const rawText = await response.text()
-    setTestResponseRaw(rawText)
-
-    let parsed: unknown = null
+    setIsRunningTest(true)
+    setTestError(null)
+    setGeneratedCaptions([])
+    setTestResponseRaw('')
 
     try {
-      parsed = rawText ? JSON.parse(rawText) : null
-    } catch {
-      parsed = { rawText }
+      const payload = {
+        flavorId: activeFlavorId,
+        imageId: testImageId,
+        imageUrl: imageById.get(testImageId) ?? '',
+        imageSource: 'images'
+      }
+
+      setTestPayload(JSON.stringify(payload, null, 2))
+
+      const response = await fetch('/api/prompt-chain-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      const rawText = await response.text()
+      setTestResponseRaw(rawText)
+
+      let parsed: unknown = null
+
+      try {
+        parsed = rawText ? JSON.parse(rawText) : null
+      } catch {
+        parsed = { rawText }
+      }
+
+      if (!response.ok) {
+        const errorText =
+          typeof parsed === 'object' && parsed && 'errorText' in parsed
+            ? asText((parsed as Record<string, unknown>).errorText)
+            : rawText
+
+        setTestError(errorText || 'Prompt-chain test failed.')
+        return
+      }
+
+      if (typeof parsed === 'object' && parsed && 'errorText' in parsed) {
+        setTestError(asText((parsed as Record<string, unknown>).errorText) || 'Prompt-chain test failed.')
+        return
+      }
+
+      const normalized = normalizeApiCaptions(parsed)
+      setGeneratedCaptions(normalized)
+
+      const savedCount =
+        typeof parsed === 'object' && parsed && 'savedCount' in parsed
+          ? Number((parsed as Record<string, unknown>).savedCount ?? 0)
+          : 0
+
+      if (!normalized.length) {
+        setTestError(`API returned success, but no captions were recognized.\n\nRaw response:\n${rawText}`)
+        return
+      }
+
+      if (savedCount > 0) {
+        router.refresh()
+      } else {
+        setTestError(`Captions displayed, but save count was 0.\n\nRaw response:\n${rawText}`)
+      }
+    } catch (error) {
+      setTestError(error instanceof Error ? error.message : 'Prompt-chain test failed before the API responded.')
+    } finally {
+      setIsRunningTest(false)
     }
-
-    if (!response.ok) {
-      const errorText =
-        typeof parsed === 'object' && parsed && 'errorText' in parsed
-          ? asText((parsed as Record<string, unknown>).errorText)
-          : rawText
-
-      setTestError(errorText || 'Prompt-chain test failed.')
-      return
-    }
-
-    const normalized = normalizeApiCaptions(parsed)
-    setGeneratedCaptions(normalized)
-
-    if (!normalized.length) {
-      setTestError(`API returned success, but no captions were recognized.\n\nRaw response:\n${rawText}`)
-    }
-  } catch (error) {
-    setTestError(error instanceof Error ? error.message : 'Prompt-chain test failed before the API responded.')
-  } finally {
-    setIsRunningTest(false)
   }
-}
 
   return (
     <section className="grid gap-6">
@@ -312,6 +331,7 @@ export function PromptChainStudioSection({
               <p className="mt-1 whitespace-pre-wrap">{feedback.message}</p>
             </div>
           ) : null}
+
           {selectedView === 'overview' ? (
             <>
               <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
@@ -378,12 +398,6 @@ export function PromptChainStudioSection({
                     <p className="font-semibold text-[var(--foreground)]">Schema-aware editing rule</p>
                     <p className="mt-2">Only fields already present in the loaded schema are shown as structured inputs. If a field is absent from current rows, the studio intentionally avoids guessing it.</p>
                   </div>
-                  <div className="mt-4 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
-                    <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug API response</p>
-                    <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">
-                      {testResponseRaw || 'Run a test to inspect the raw API response.'}
-                    </pre>
-                  </div>
                 </article>
               </div>
             </>
@@ -430,16 +444,13 @@ export function PromptChainStudioSection({
                     <form key={activeFlavorId} action={updateFlavor} className="grid gap-4">
                       <input type="hidden" name="id" value={activeFlavorId} />
                       <label className="grid gap-2 text-sm">
-                        <span className="font-medium">Name</span>
-                        <label className="grid gap-2 text-sm">
-                          <span className="font-medium">Slug</span>
-                          <input
-                            name="slug"
-                            required
-                            defaultValue={getFlavorSlug(activeFlavor)}
-                            className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2"
-                          />
-                      </label>
+                        <span className="font-medium">Slug</span>
+                        <input
+                          name="slug"
+                          required
+                          defaultValue={getFlavorSlug(activeFlavor)}
+                          className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2"
+                        />
                       </label>
                       <label className="grid gap-2 text-sm">
                         <span className="font-medium">Description (optional)</span>
@@ -506,7 +517,7 @@ export function PromptChainStudioSection({
                         <div className="flex gap-2">
                           <form action={reorderStep}>
                             <input type="hidden" name="id" value={getRowId(step)} />
-                        <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
+                            <input type="hidden" name="return_flavor_id" value={activeFlavorId} />
                             <input type="hidden" name="direction" value="up" />
                             <button disabled={index === 0} type="submit" className="rounded-full border border-[var(--panel-border)] bg-[var(--panel)] px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Move up</button>
                           </form>
@@ -617,6 +628,14 @@ export function PromptChainStudioSection({
                   <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug request payload</p>
                   <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">{testPayload || 'Select a flavor and image, then run a test.'}</pre>
                 </div>
+
+                <div className="mt-4 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
+                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug API response</p>
+                  <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">
+                    {testResponseRaw || 'Run a test to inspect the raw API response.'}
+                  </pre>
+                </div>
+
                 {testError ? <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200 whitespace-pre-wrap">{testError}</div> : null}
               </article>
 
