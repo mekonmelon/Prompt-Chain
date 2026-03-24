@@ -114,19 +114,52 @@ export function extractPromptVariables(rows: GenericRow[]) {
 }
 
 export function normalizeApiCaptions(payload: unknown) {
-  const list = Array.isArray(payload)
-    ? payload
-    : Array.isArray((payload as { data?: unknown[] } | null)?.data)
-      ? (payload as { data: unknown[] }).data
-      : Array.isArray((payload as { captions?: unknown[] } | null)?.captions)
-        ? (payload as { captions: unknown[] }).captions
-        : []
+  const source =
+    Array.isArray(payload)
+      ? payload
+      : Array.isArray((payload as { data?: unknown[] } | null)?.data)
+        ? (payload as { data: unknown[] }).data
+        : Array.isArray((payload as { captions?: unknown[] } | null)?.captions)
+          ? (payload as { captions: unknown[] }).captions
+          : Array.isArray((payload as { results?: unknown[] } | null)?.results)
+            ? (payload as { results: unknown[] }).results
+            : Array.isArray((payload as { output?: unknown[] } | null)?.output)
+              ? (payload as { output: unknown[] }).output
+              : Array.isArray((payload as { response?: unknown[] } | null)?.response)
+                ? (payload as { response: unknown[] }).response
+                : typeof (payload as { caption?: unknown } | null)?.caption === 'string'
+                  ? [{ caption: (payload as { caption: string }).caption }]
+                  : typeof (payload as { text?: unknown } | null)?.text === 'string'
+                    ? [{ text: (payload as { text: string }).text }]
+                    : typeof (payload as { content?: unknown } | null)?.content === 'string'
+                      ? [{ content: (payload as { content: string }).content }]
+                      : []
 
-  return list.map((item, index) => {
+  return source.map((item, index) => {
+    if (typeof item === 'string') {
+      return {
+        id: `generated-${index + 1}`,
+        caption: item,
+        imageUrl: '',
+        flavorId: '',
+        createdAt: '',
+        raw: item
+      }
+    }
+
     const row = (item ?? {}) as GenericRow
+
     return {
       id: asText(row.id) || `generated-${index + 1}`,
-      caption: asText(row.caption || row.caption_text || row.content || row.text),
+      caption: asText(
+        row.caption ??
+          row.caption_text ??
+          row.content ??
+          row.text ??
+          row.output ??
+          row.result ??
+          row.response
+      ),
       imageUrl: asText(row.image_url || row.url || row.public_url),
       flavorId: asText(row.flavor_id || row.humor_flavor_id),
       createdAt: asText(row.created_datetime_utc || row.created_at),
