@@ -379,10 +379,10 @@ export function PromptChainStudioSection({
                 <form action={createFlavor} className="mt-4 grid gap-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="grid gap-2 text-sm">
-                      <span className="font-medium">Slug</span>
-                      <input name="slug" required className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="e.g. dry-observational" />
+                      <span className="font-medium">Name</span>
+                      <input name="name" required className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" placeholder="e.g. Dry Observational" />
                     </label>
-                    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Rows in <code>humor_flavors</code> use <code>slug</code> and <code>description</code> instead of a dedicated name column.</div>
+                    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-4 py-3 text-sm text-[var(--muted-foreground)]">Rows in <code>humor_flavors</code> use <code>name</code> and <code>description</code> for the primary flavor metadata fields.</div>
                   </div>
                   <label className="grid gap-2 text-sm">
                     <span className="font-medium">Description</span>
@@ -412,8 +412,8 @@ export function PromptChainStudioSection({
                     <form action={updateFlavor} className="grid gap-4">
                       <input type="hidden" name="id" value={activeFlavorId} />
                       <label className="grid gap-2 text-sm">
-                        <span className="font-medium">Slug</span>
-                        <input name="slug" required defaultValue={getFlavorSlug(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
+                        <span className="font-medium">Name</span>
+                        <input name="name" required defaultValue={getFlavorName(activeFlavor)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2" />
                       </label>
                       <label className="grid gap-2 text-sm">
                         <span className="font-medium">Description</span>
