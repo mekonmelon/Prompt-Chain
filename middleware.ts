@@ -46,15 +46,17 @@ export async function middleware(request: NextRequest) {
   if (user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('is_superadmin')
+      .select('is_superadmin, is_matrix_admin')
       .eq('id', user.id)
       .single()
 
-    if (!profile?.is_superadmin && pathname !== '/unauthorized') {
+    const hasAccess = Boolean(profile?.is_superadmin || profile?.is_matrix_admin)
+
+    if (!hasAccess && pathname !== '/unauthorized') {
       return NextResponse.redirect(new URL('/unauthorized', request.url))
     }
 
-    if (profile?.is_superadmin && (pathname === '/login' || pathname === '/unauthorized')) {
+    if (hasAccess && (pathname === '/login' || pathname === '/unauthorized')) {
       return NextResponse.redirect(new URL('/', request.url))
     }
   }
