@@ -364,9 +364,14 @@ export default async function Home({
     )
   }
 
-  const sourceFlavor = flavors.find((row) => getFlavorId(row) === id)
+  // ✅ FETCH SOURCE FLAVOR INSIDE ACTION (CRITICAL)
+  const { data: sourceFlavor, error: flavorError } = await supabase
+    .from(TABLES.flavors)
+    .select('*')
+    .eq('id', id)
+    .single()
 
-  if (!sourceFlavor) {
+  if (flavorError || !sourceFlavor) {
     redirect(
       buildRedirectUrl(
         'flavors',
@@ -379,9 +384,14 @@ export default async function Home({
   const sourceDescription = getFlavorDescription(sourceFlavor)
   const sourceSlug = getFlavorSlug(sourceFlavor)
 
+  // ✅ FETCH ALL FLAVORS FOR SLUG COLLISION CHECK
+  const { data: allFlavors } = await supabase
+    .from(TABLES.flavors)
+    .select('slug')
+
   const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : null
   const duplicateSlug = buildDuplicateSlug(
-    flavors.map((row) => getFlavorSlug(row)),
+    (allFlavors ?? []).map((row) => getFlavorSlug(row)),
     sourceSlug,
     sourceDescription || id
   )
@@ -412,70 +422,76 @@ export default async function Home({
       )
     }
 
-      const newFlavorId = insertedFlavor.id
+    const newFlavorId = insertedFlavor.id
 
-      const relatedSteps = sortSteps(steps.filter((row) => getStepFlavorId(row) === id))
+    // ✅ FETCH STEPS INSIDE ACTION (CRITICAL)
+    const { data: relatedSteps } = await supabase
+      .from(TABLES.steps)
+      .select('*')
+      .eq(stepFlavorKey, id)
 
-      if (relatedSteps.length) {
-        const stepPayloads = relatedSteps.map((step, index) => ({
-          [stepFlavorKey]: newFlavorId,
-          created_by_user_id: profile.id,
-          modified_by_user_id: profile.id,
-          ...(stepOrderKey in step && { [stepOrderKey]: index + 1 }),
-          ...(stepTemperatureKey in step && { [stepTemperatureKey]: asNumber(step[stepTemperatureKey]) }),
-          ...(stepInputTypeKey in step && { [stepInputTypeKey]: asNumber(step[stepInputTypeKey]) }),
-          ...(stepOutputTypeKey in step && { [stepOutputTypeKey]: asNumber(step[stepOutputTypeKey]) }),
-          ...(stepModelKey in step && { [stepModelKey]: asNumber(step[stepModelKey]) }),
-          ...(stepTitleKey in step && { [stepTitleKey]: asNumber(step[stepTitleKey]) }),
-          ...(stepSystemPromptKey in step && { [stepSystemPromptKey]: step[stepSystemPromptKey] ?? null }),
-          ...(stepUserPromptKey in step && { [stepUserPromptKey]: step[stepUserPromptKey] ?? null }),
-          ...(stepBodyKey in step && { [stepBodyKey]: step[stepBodyKey] ?? null })
-        }))
+    const sortedSteps = sortSteps(relatedSteps ?? [])
 
-        const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
+    if (sortedSteps.length) {
+      const stepPayloads = sortedSteps.map((step, index) => ({
+        [stepFlavorKey]: newFlavorId,
+        created_by_user_id: profile.id,
+        modified_by_user_id: profile.id,
+        ...(stepOrderKey in step && { [stepOrderKey]: index + 1 }),
+        ...(stepTemperatureKey in step && { [stepTemperatureKey]: asNumber(step[stepTemperatureKey]) }),
+        ...(stepInputTypeKey in step && { [stepInputTypeKey]: asNumber(step[stepInputTypeKey]) }),
+        ...(stepOutputTypeKey in step && { [stepOutputTypeKey]: asNumber(step[stepOutputTypeKey]) }),
+        ...(stepModelKey in step && { [stepModelKey]: asNumber(step[stepModelKey]) }),
+        ...(stepTitleKey in step && { [stepTitleKey]: asNumber(step[stepTitleKey]) }),
+        ...(stepSystemPromptKey in step && { [stepSystemPromptKey]: step[stepSystemPromptKey] ?? null }),
+        ...(stepUserPromptKey in step && { [stepUserPromptKey]: step[stepUserPromptKey] ?? null }),
+        ...(stepBodyKey in step && { [stepBodyKey]: step[stepBodyKey] ?? null })
+      }))
 
-        if (insertStepsError) {
-          await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
+      const { error: insertStepsError } = await supabase.from(TABLES.steps).insert(stepPayloads)
 
-          redirect(
-            buildRedirectUrl(
-              'flavors',
-              {
-                type: 'error',
-                scope: 'flavor-duplicate',
-                message: insertStepsError.message
-              },
-              id
-            )
+      if (insertStepsError) {
+        await supabase.from(TABLES.flavors).delete().eq('id', newFlavorId)
+
+        redirect(
+          buildRedirectUrl(
+            'flavors',
+            {
+              type: 'error',
+              scope: 'flavor-duplicate',
+              message: insertStepsError.message
+            },
+            id
           )
-        }
+        )
       }
-
-      revalidatePath('/')
-
-      redirect(
-        buildRedirectUrl(
-          'flavors',
-          { type: 'success', scope: 'flavor-duplicate', message: 'Flavor duplicated successfully.' },
-          newFlavorId
-        )
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-
-      redirect(
-        buildRedirectUrl(
-          'flavors',
-          {
-            type: 'error',
-            scope: 'flavor-duplicate',
-            message
-          },
-          id
-        )
-      )
     }
+
+    revalidatePath('/')
+
+    redirect(
+      buildRedirectUrl(
+        'flavors',
+        { type: 'success', scope: 'flavor-duplicate', message: 'Flavor duplicated successfully.' },
+        newFlavorId
+      )
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+
+    redirect(
+      buildRedirectUrl(
+        'flavors',
+        {
+          type: 'error',
+          scope: 'flavor-duplicate',
+          message
+        },
+        id
+      )
+    )
   }
+}
   
   async function createStep(formData: FormData) {
     'use server'
