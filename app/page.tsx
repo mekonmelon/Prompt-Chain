@@ -215,12 +215,12 @@ export default async function Home({
   const stepModelKey = pickFirstKey(steps, STEP_MODEL_KEYS) ?? 'llm_model_id'
   const stepFlavorKey = pickFirstKey(steps, FLAVOR_RELATION_KEYS) ?? 'flavor_id'
   const stepOrderKey = pickFirstKey(steps, STEP_ORDER_KEYS) ?? 'step_order'
-  const flavorNameKey = pickFirstKey(flavors, FLAVOR_NAME_KEYS) ?? 'name'
 
   async function createFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
-    const name = String(formData.get('name') ?? '').trim()
+    const rawSlug = String(formData.get('slug') ?? '').trim()
+    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const description = String(formData.get('description') ?? '').trim()
 
     if (!profile?.id) {
@@ -228,9 +228,9 @@ export default async function Home({
       redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'You must be signed in as an authorized profile to create a flavor.' }))
     }
 
-    if (!name || !description) {
-      console.error('[studio.action] create flavor validation failed', { hasName: Boolean(name), hasDescription: Boolean(description) })
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'Create flavor requires both a name and description.' }))
+    if (!slug) {
+      console.error('[studio.action] create flavor validation failed', { rawSlug })
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: 'Create flavor requires a valid slug.' }))
     }
 
     let insertedId = ''
@@ -238,8 +238,8 @@ export default async function Home({
 
     try {
       const payload: GenericRow = {
-        [flavorNameKey]: name,
-        description,
+        slug,
+        description: description || null,
         created_by_user_id: profile.id,
         modified_by_user_id: profile.id
       }
@@ -268,27 +268,28 @@ export default async function Home({
     }
 
     revalidatePath('/')
-    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${name}”.` }, insertedId))
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${slug}”.` }, insertedId))
   }
 
   async function updateFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
     const id = String(formData.get('id') ?? '').trim()
-    const name = String(formData.get('name') ?? '').trim()
+    const rawSlug = String(formData.get('slug') ?? '').trim()
+    const slug = rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     const description = String(formData.get('description') ?? '').trim()
 
-    if (!id || !profile?.id || !name || !description) {
-      console.error('[studio.action] update flavor validation failed', { id, hasProfile: Boolean(profile?.id), hasName: Boolean(name), hasDescription: Boolean(description) })
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: 'Update flavor requires an id, name, and description.' }, id))
+    if (!id || !profile?.id || !slug) {
+      console.error('[studio.action] update flavor validation failed', { id, hasProfile: Boolean(profile?.id), rawSlug })
+      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-update', message: 'Update flavor requires an id and valid slug.' }, id))
     }
 
     let actionError: string | null = null
 
     try {
       const payload: GenericRow = {
-        [flavorNameKey]: name,
-        description,
+        slug,
+        description: description || null,
         modified_by_user_id: profile.id
       }
 
@@ -368,21 +369,17 @@ export default async function Home({
     const sourceDescription = getFlavorDescription(sourceFlavor)
     const sourceName = getFlavorName(sourceFlavor)
     const sourceSlug = getFlavorSlug(sourceFlavor)
-    const duplicateName = sourceName ? `${sourceName} (Copy)` : `Copy of ${id}`
-    const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : `Copy of ${sourceName || id}`
-    const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceName || sourceDescription)
+    const duplicateDescription = sourceDescription ? `${sourceDescription} (Copy)` : null
+    const duplicateSlug = buildDuplicateSlug(flavors.map((row) => getFlavorSlug(row)), sourceSlug, sourceDescription || id)
     let insertedFlavorId = ''
     let actionError: string | null = null
 
     try {
       const flavorPayload: GenericRow = {
-        [flavorNameKey]: duplicateName,
+        slug: duplicateSlug,
         description: duplicateDescription,
         created_by_user_id: profile.id,
         modified_by_user_id: profile.id
-      }
-      if (sourceSlug || sourceFlavor?.slug !== undefined) {
-        flavorPayload.slug = duplicateSlug
       }
 
       const { data: insertedFlavor, error: insertFlavorError } = await supabase
@@ -434,7 +431,7 @@ export default async function Home({
 
     console.info('[studio.action] duplicate flavor success', { sourceFlavorId: id, newFlavorId: insertedFlavorId, profileId: profile.id })
     revalidatePath('/')
-    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-duplicate', message: `Duplicated flavor as “${duplicateName}”.` }, insertedFlavorId))
+    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-duplicate', message: `Duplicated flavor as “${duplicateSlug}”.` }, insertedFlavorId))
   }
 
   async function createStep(formData: FormData) {
