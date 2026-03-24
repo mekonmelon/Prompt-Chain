@@ -261,14 +261,6 @@ export default async function Home({
       actionError = `Could not create flavor: ${message}`
     }
 
-    if (actionError) {
-      redirect(buildRedirectUrl('flavors', { type: 'error', scope: 'flavor-create', message: actionError }))
-    }
-
-    revalidatePath('/')
-    redirect(buildRedirectUrl('flavors', { type: 'success', scope: 'flavor-create', message: `Created flavor “${slug}”.` }, insertedId))
-  }
-
   async function updateFlavor(formData: FormData) {
     'use server'
     const supabase = createClient()
