@@ -604,65 +604,138 @@ export function PromptChainStudioSection({
           ) : null}
 
           {selectedView === 'test-runner' ? (
-            <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-              <article className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-6 shadow-sm">
-                <h3 className="text-lg font-semibold">Flavor test runner</h3>
-                <p className="mt-2 text-sm leading-7 text-[var(--muted-foreground)]">This runner sends the selected flavor and image source through a configurable REST endpoint. It preserves backend error text verbatim when the upstream call fails.</p>
-                <div className="mt-4 grid gap-4">
-                  <label className="grid gap-2 text-sm">
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_360px]">
+              <article className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-6 shadow-sm min-w-0">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold">Flavor test runner</h3>
+                    <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted-foreground)]">
+                      Run a selected humor flavor against an image from the test set. Debug details stay available for troubleshooting, but collapse by default so the workspace stays readable.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {activeFlavor ? badge(getFlavorLabel(activeFlavor), 'accent') : badge('No flavor selected')}
+                    {testImageId ? badge('Image selected') : badge('No image selected')}
+                    {isRunningTest ? badge('Running test…', 'accent') : null}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                  <label className="grid gap-2 text-sm min-w-0">
                     <span className="font-medium">Selected flavor</span>
-                    <select value={activeFlavorId} onChange={(event) => setSelectedFlavorId(event.target.value)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2">
-                      {flavors.map((flavor) => <option key={getFlavorId(flavor)} value={getFlavorId(flavor)}>{getFlavorLabel(flavor)}</option>)}
+                    <select
+                      value={activeFlavorId}
+                      onChange={(event) => setSelectedFlavorId(event.target.value)}
+                      className="min-w-0 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2"
+                    >
+                      {flavors.map((flavor) => (
+                        <option key={getFlavorId(flavor)} value={getFlavorId(flavor)}>
+                          {getFlavorLabel(flavor)}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label className="grid gap-2 text-sm">
+                  <label className="grid gap-2 text-sm min-w-0">
                     <span className="font-medium">Image source</span>
-                    <select value={testImageId} onChange={(event) => setTestImageId(event.target.value)} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2">
-                      {images.map((image) => <option key={getRowId(image)} value={getRowId(image)}>{getRowId(image)} {getImageUrl(image) ? '· image row' : ''}</option>)}
+                    <select
+                      value={testImageId}
+                      onChange={(event) => setTestImageId(event.target.value)}
+                      className="min-w-0 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] px-3 py-2"
+                    >
+                      {images.map((image) => (
+                        <option key={getRowId(image)} value={getRowId(image)}>
+                          {getRowId(image)} {getImageUrl(image) ? '· image row' : ''}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <button disabled={!activeFlavorId || !testImageId || isRunningTest} onClick={handleRunTest} type="button" className="w-fit rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">{isRunningTest ? 'Running test…' : 'Run prompt chain test'}</button>
                 </div>
 
-                <div className="mt-6 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
-                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug request payload</p>
-                  <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">{testPayload || 'Select a flavor and image, then run a test.'}</pre>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    disabled={!activeFlavorId || !testImageId || isRunningTest}
+                    onClick={handleRunTest}
+                    type="button"
+                    className="rounded-full bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {isRunningTest ? 'Running test…' : 'Run prompt chain test'}
+                  </button>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    The runner sends the selected flavor and image source through the REST endpoint, then stores returned captions when the save succeeds.
+                  </p>
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
-                  <p className="text-xs uppercase tracking-wide text-[var(--muted-foreground)]">Debug API response</p>
-                  <pre className="mt-3 overflow-auto text-xs leading-6 text-[var(--muted-foreground)]">
-                    {testResponseRaw || 'Run a test to inspect the raw API response.'}
-                  </pre>
-                </div>
+                {testError ? (
+                  <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200 whitespace-pre-wrap">
+                    {testError}
+                  </div>
+                ) : null}
 
-                {testError ? <div className="mt-4 rounded-2xl border border-rose-400/30 bg-rose-500/10 p-4 text-sm text-rose-200 whitespace-pre-wrap">{testError}</div> : null}
+                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                  <details className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4 min-w-0">
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Debug request payload
+                    </summary>
+                    <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-[var(--muted-foreground)]">
+                      {testPayload || 'Select a flavor and image, then run a test.'}
+                    </pre>
+                  </details>
+
+                  <details className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4 min-w-0" open={Boolean(testResponseRaw)}>
+                    <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                      Debug API response
+                    </summary>
+                    <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-[var(--muted-foreground)]">
+                      {testResponseRaw || 'Run a test to inspect the raw API response.'}
+                    </pre>
+                  </details>
+                </div>
               </article>
 
-              <article className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-6 shadow-sm">
+              <article className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-6 shadow-sm xl:sticky xl:top-24 xl:self-start min-w-0">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold">Generated captions</h3>
-                    <p className="text-sm text-[var(--muted-foreground)]">Cards are normalized from the REST response shape when captions are returned.</p>
+                    <p className="text-sm text-[var(--muted-foreground)]">
+                      Returned captions are shown as compact review cards.
+                    </p>
                   </div>
                   {badge(`${generatedCaptions.length} results`, 'accent')}
                 </div>
-                <div className="mt-4 space-y-3">
-                  {generatedCaptions.length ? generatedCaptions.map((result) => (
-                    <div key={result.id} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{result.caption || 'No caption text field returned.'}</p>
-                          <p className="mt-2 text-xs text-[var(--muted-foreground)]">Flavor: {result.flavorId || activeFlavorId || '—'} · Created: {formatDate(result.createdAt)}</p>
+
+                <div className="mt-4 space-y-3 max-h-[70vh] overflow-auto pr-1">
+                  {generatedCaptions.length ? (
+                    generatedCaptions.map((result) => (
+                      <div key={result.id} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-muted)] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold leading-6">{result.caption || 'No caption text field returned.'}</p>
+                          {(result.imageUrl || imageById.get(testImageId)) ? (
+                            <a
+                              href={result.imageUrl || imageById.get(testImageId)}
+                              target="_blank"
+                              className="shrink-0 text-xs font-semibold text-indigo-400"
+                              rel="noreferrer"
+                            >
+                              Open image
+                            </a>
+                          ) : null}
                         </div>
-                        {(result.imageUrl || imageById.get(testImageId)) ? <a href={result.imageUrl || imageById.get(testImageId)} target="_blank" className="text-xs font-semibold text-indigo-400" rel="noreferrer">Open image</a> : null}
+                        <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+                          Flavor: {result.flavorId || activeFlavorId || '—'} · Created: {formatDate(result.createdAt)}
+                        </p>
+                        <details className="mt-3 text-xs text-[var(--muted-foreground)]">
+                          <summary className="cursor-pointer font-semibold">Raw response item</summary>
+                          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words leading-6">
+                            {JSON.stringify(result.raw, null, 2)}
+                          </pre>
+                        </details>
                       </div>
-                      <details className="mt-3 text-xs text-[var(--muted-foreground)]">
-                        <summary className="cursor-pointer font-semibold">Raw response item</summary>
-                        <pre className="mt-2 overflow-auto leading-6">{JSON.stringify(result.raw, null, 2)}</pre>
-                      </details>
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-[var(--panel-border)] bg-[var(--panel-muted)] p-4 text-sm text-[var(--muted-foreground)]">
+                      No generated captions yet. Run a test to populate this review panel.
                     </div>
-                  )) : <p className="rounded-2xl border border-dashed border-[var(--panel-border)] bg-[var(--panel-muted)] p-4 text-sm text-[var(--muted-foreground)]">No generated captions yet. Configure the REST endpoint and run a test.</p>}
+                  )}
                 </div>
               </article>
             </div>
